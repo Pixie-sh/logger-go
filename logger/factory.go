@@ -5,12 +5,15 @@ import (
 	"fmt"
 )
 
+// FactoryCreateFn create logger abstraction
 type FactoryCreateFn = func(ctx context.Context, configuration Configuration) (Interface, error)
 
+// Factory logger factory declaration
 type Factory struct {
 	createMap map[string]FactoryCreateFn
 }
 
+// NewFactory return a new Logger factory instance
 func NewFactory(_ context.Context, config FactoryConfiguration) (Factory, error) {
 	if config.Mapping == nil {
 		return Factory{}, fmt.Errorf("unable to creater factory, configuration is missing mappings")

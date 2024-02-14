@@ -1,5 +1,5 @@
 package logger
 
 const (
-	StdOutLoggerDriver = "stdout_logger_driver"
+	JSONLoggerDriver = "json_logger_driver"
 )
