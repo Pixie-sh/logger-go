@@ -24,7 +24,7 @@ func TestFactory(t *testing.T) {
 	})
 	assert.Nil(t, err)
 
-	logger.Log("This is a log message")
+	logger.Log("This is a log messagee")
 
 	fmt.Println("-------------")
 	logger.With("userID", 123).Error("This is an error with userID")

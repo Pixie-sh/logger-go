@@ -21,3 +21,4 @@
 go.work
 /.idea/logger-go.iml
 /.idea/modules.xml
+/vendor/

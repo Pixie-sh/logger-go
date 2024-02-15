@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pixie-sh/logger-go/structs"
 	"io"
 	"time"
 )
@@ -152,5 +153,5 @@ func (l *JsonLogger) log(level LogLevelEnum, format string, args ...any) {
 		return
 	}
 
-	_, _ = fmt.Fprintln(l.writer, string(jsonLog))
+	_, _ = fmt.Fprintln(l.writer, *structs.UnsafeString(jsonLog))
 }
