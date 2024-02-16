@@ -30,17 +30,18 @@ func createJSONLogger(ctx context.Context, generic Configuration) (Interface, er
 		cfg.Writer = os.Stdout //default
 	}
 
-	return NewJsonLogger(ctx, cfg.Writer, generic.App, generic.Scope, generic.UID, generic.LogLevel)
+	return NewJsonLogger(ctx, cfg.Writer, generic.App, generic.Scope, generic.UID, generic.LogLevel, append(generic.ExpectedCtxFields, TraceID))
 }
 
 // Configuration  logger generic config
 type Configuration struct {
-	App      string       `toml:"app" ,json:"app" ,mapstructure:"app"`
-	Scope    string       `toml:"scope" ,json:"scope" ,mapstructure:"scope"`
-	UID      string       `toml:"uid" ,json:"uid" ,mapstructure:"uid"`
-	LogLevel LogLevelEnum `toml:"level" ,json:"level" ,mapstructure:"level"`
-	Driver   string       `toml:"driver" ,json:"driver" ,mapstructure:"driver"`
-	Values   any          `toml:"values" ,json:"values" ,mapstructure:"values"`
+	App               string       `toml:"app" ,json:"app" ,mapstructure:"app"`
+	Scope             string       `toml:"scope" ,json:"scope" ,mapstructure:"scope"`
+	UID               string       `toml:"uid" ,json:"uid" ,mapstructure:"uid"`
+	LogLevel          LogLevelEnum `toml:"level" ,json:"level" ,mapstructure:"level"`
+	Driver            string       `toml:"driver" ,json:"driver" ,mapstructure:"driver"`
+	Values            any          `toml:"values" ,json:"values" ,mapstructure:"values"`
+	ExpectedCtxFields []string     `toml:"expectedCtxFields" ,json:"expectedCtxFields" ,mapstructure:"expectedCtxFields"`
 }
 
 // JSONLoggerConfiguration json logger with specific

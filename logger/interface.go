@@ -1,5 +1,7 @@
 package logger
 
+import "context"
+
 // LogLevelEnum is an enum to represent log levels.
 type LogLevelEnum int
 
@@ -28,6 +30,7 @@ func (l LogLevelEnum) String() string {
 
 // Interface LoggerInterface represents the basic logging interface.
 type Interface interface {
+	WithCtx(ctx context.Context) Interface
 	With(field string, value any) Interface
 	Log(format string, args ...any)
 	Error(format string, args ...any)

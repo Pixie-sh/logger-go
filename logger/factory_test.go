@@ -21,10 +21,15 @@ func TestFactory(t *testing.T) {
 		Values: JSONLoggerConfiguration{
 			Writer: os.Stdout,
 		},
+		ExpectedCtxFields: []string{
+			"someValKey",
+		},
 	})
 	assert.Nil(t, err)
 
-	logger.Log("This is a log messagee")
+	ctx := context.WithValue(context.Background(), "someValKey", "someVal")
+	ctx = context.WithValue(ctx, TraceID, "someTraceID")
+	logger.WithCtx(ctx).Log("This is a log messagee")
 
 	fmt.Println("-------------")
 	logger.With("userID", 123).Error("This is an error with userID")
