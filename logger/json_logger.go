@@ -179,7 +179,7 @@ func (l *JsonLogger) log(level LogLevelEnum, format string, args ...any) {
 	}
 
 	logEntry := map[string]any{
-		"timestamp": time.Now().Format(time.RFC3339),
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"level":     level.String(),
 		"app":       l.App,
 		"scope":     l.Scope,
