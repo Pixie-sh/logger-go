@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pixie-sh/logger-go/caller"
 	"github.com/pixie-sh/logger-go/structs"
 	"io"
 	"time"
@@ -40,21 +41,25 @@ func (i *innerJsonLog) WithCtx(ctx context.Context) Interface {
 
 // Log logs a message at LOG level.
 func (i *innerJsonLog) Log(format string, args ...any) {
+	i.With("caller", caller.Upper())
 	i.log(LOG, format, args...)
 }
 
 // Error logs a message at ERROR level.
 func (i *innerJsonLog) Error(format string, args ...any) {
+	i.With("caller", caller.Upper())
 	i.log(ERROR, format, args...)
 }
 
 // Warn logs a message at WARN level.
 func (i *innerJsonLog) Warn(format string, args ...any) {
+	i.With("caller", caller.Upper())
 	i.log(WARN, format, args...)
 }
 
 // Debug logs a message at DEBUG level.
 func (i *innerJsonLog) Debug(format string, args ...any) {
+	i.With("caller", caller.Upper())
 	i.log(DEBUG, format, args...)
 }
 
@@ -71,7 +76,12 @@ func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
 
 	logEntry := map[string]any{}
 	for k, v := range i.fields {
-		logEntry[k] = v
+		switch v.(type) {
+		case error:
+			logEntry[k] = fmt.Sprintf("%+v", v.(error))
+		default:
+			logEntry[k] = v
+		}
 	}
 
 	logEntry["timestamp"] = time.Now().Format(time.RFC3339)
@@ -149,21 +159,25 @@ func (l *JsonLogger) WithCtx(ctx context.Context) Interface {
 
 // Log logs a message at LOG level.
 func (l *JsonLogger) Log(format string, args ...any) {
+	l.With("caller", caller.Upper())
 	l.log(LOG, format, args...)
 }
 
 // Error logs a message at ERROR level.
 func (l *JsonLogger) Error(format string, args ...any) {
+	l.With("caller", caller.Upper())
 	l.log(ERROR, format, args...)
 }
 
 // Warn logs a message at WARN level.
 func (l *JsonLogger) Warn(format string, args ...any) {
+	l.With("caller", caller.Upper())
 	l.log(WARN, format, args...)
 }
 
 // Debug logs a message at DEBUG level.
 func (l *JsonLogger) Debug(format string, args ...any) {
+	l.With("caller", caller.Upper())
 	l.log(DEBUG, format, args...)
 }
 
