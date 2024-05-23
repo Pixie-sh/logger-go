@@ -76,11 +76,15 @@ func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
 
 	logEntry := map[string]any{}
 	for k, v := range i.fields {
-		switch v.(type) {
-		case error:
-			logEntry[k] = fmt.Sprintf("%+v", v.(error))
-		default:
-			logEntry[k] = v
+		if v == nil {
+			logEntry[k] = "nil"
+		} else {
+			switch v.(type) {
+			case error:
+				logEntry[k] = fmt.Sprintf("%+v", v.(error))
+			default:
+				logEntry[k] = v
+			}
 		}
 	}
 
