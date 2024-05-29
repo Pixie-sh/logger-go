@@ -17,12 +17,20 @@ const Scope = "SCOPE"
 // DebugMode mode
 const DebugMode = "DEBUG_MODE"
 
+// LogLevel mode
+const LogLevel = "LOG_LEVEL"
+
 // IsDebugActive check if it's in debug mode
 func IsDebugActive() bool {
 	debugValue := os.Getenv(DebugMode)
 	return debugValue == "TRUE" ||
 		strings.ToUpper(debugValue) == "TRUE" ||
 		debugValue == "1"
+}
+
+// EnvLogLevel get env log level
+func EnvLogLevel() string {
+	return os.Getenv(LogLevel)
 }
 
 // EnvAppName app runtime name

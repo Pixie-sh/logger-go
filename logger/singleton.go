@@ -14,5 +14,16 @@ var Logger, _ = NewJsonLogger(
 	fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
 	env.EnvScope(),
 	fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
-	LOG,
+	func() LogLevelEnum {
+		switch env.EnvLogLevel() {
+		case "DEBUG":
+			return DEBUG
+		case "WARN":
+			return WARN
+		case "ERROR":
+			return ERROR
+		default:
+			return LOG
+		}
+	}(),
 	[]string{TraceID})
