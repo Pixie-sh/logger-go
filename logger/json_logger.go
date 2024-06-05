@@ -163,30 +163,26 @@ func (l *JsonLogger) WithCtx(ctx context.Context) Interface {
 
 // Log logs a message at LOG level.
 func (l *JsonLogger) Log(format string, args ...any) {
-	l.With("caller", caller.Upper())
-	l.log(LOG, format, args...)
+	l.log(LOG, caller.Upper(), format, args...)
 }
 
 // Error logs a message at ERROR level.
 func (l *JsonLogger) Error(format string, args ...any) {
-	l.With("caller", caller.Upper())
-	l.log(ERROR, format, args...)
+	l.log(ERROR, caller.Upper(), format, args...)
 }
 
 // Warn logs a message at WARN level.
 func (l *JsonLogger) Warn(format string, args ...any) {
-	l.With("caller", caller.Upper())
-	l.log(WARN, format, args...)
+	l.log(WARN, caller.Upper(), format, args...)
 }
 
 // Debug logs a message at DEBUG level.
 func (l *JsonLogger) Debug(format string, args ...any) {
-	l.With("caller", caller.Upper())
-	l.log(DEBUG, format, args...)
+	l.log(DEBUG, caller.Upper(), format, args...)
 }
 
 // log is an internal method to log messages with structured logging.
-func (l *JsonLogger) log(level LogLevelEnum, format string, args ...any) {
+func (l *JsonLogger) log(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
 	if l.LogLevel < level {
 		return
 	}
@@ -197,6 +193,7 @@ func (l *JsonLogger) log(level LogLevelEnum, format string, args ...any) {
 	}
 
 	logEntry := map[string]any{
+		"caller":    call,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"level":     level.String(),
 		"app":       l.App,
