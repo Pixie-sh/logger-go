@@ -7,6 +7,7 @@ import (
 	"github.com/pixie-sh/logger-go/caller"
 	"github.com/pixie-sh/logger-go/structs"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -23,18 +24,26 @@ type JsonLogger struct {
 // innerJsonLog represents a logger with additional fields.
 type innerJsonLog struct {
 	*JsonLogger
+
+	mu                sync.RWMutex
 	Ctx               context.Context
 	fields            map[string]any
 	expectedCtxFields []string
 }
 
 func (i *innerJsonLog) With(field string, value any) Interface {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	i.fields[field] = value
 	return i
 }
 
 // WithCtx adds ctx to fields
 func (i *innerJsonLog) WithCtx(ctx context.Context) Interface {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	i.Ctx = ctx
 	return i
 }
@@ -69,43 +78,51 @@ func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
 		return
 	}
 
-	msg := format
+	var logEntry = make(map[string]any)
+	var jsonLog []byte
+	var err error
+	var msg = format
+
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
 
-	logEntry := map[string]any{}
-	for k, v := range i.fields {
-		if v == nil {
-			logEntry[k] = "nil"
-		} else {
-			switch v.(type) {
-			case error:
-				logEntry[k] = fmt.Sprintf("%+v", v.(error))
-			default:
-				logEntry[k] = v
+	{
+		i.mu.RLock()
+		defer i.mu.RUnlock()
+
+		for k, v := range i.fields {
+			if v == nil {
+				logEntry[k] = "nil"
+			} else {
+				switch v.(type) {
+				case error:
+					logEntry[k] = fmt.Sprintf("%+v", v.(error))
+				default:
+					logEntry[k] = v
+				}
 			}
 		}
-	}
 
-	logEntry["timestamp"] = time.Now().Format(time.RFC3339)
-	logEntry["level"] = level.String()
-	logEntry["app"] = i.App
-	logEntry["scope"] = i.Scope
-	logEntry["message"] = msg
+		logEntry["timestamp"] = time.Now().Format(time.RFC3339)
+		logEntry["level"] = level.String()
+		logEntry["app"] = i.App
+		logEntry["scope"] = i.Scope
+		logEntry["message"] = msg
 
-	if i.UID != "" {
-		logEntry["uid"] = i.UID
-	}
+		if i.UID != "" {
+			logEntry["uid"] = i.UID
+		}
 
-	if i.Ctx != nil {
-		logEntry["ctx"] = i.ctxLog(i.Ctx)
-	}
+		if i.Ctx != nil {
+			logEntry["ctx"] = i.ctxLog(i.Ctx)
+		}
 
-	jsonLog, err := json.Marshal(logEntry)
-	if err != nil {
-		_, _ = fmt.Fprintf(i.writer, "Error marshaling log: %v", err)
-		return
+		jsonLog, err = json.Marshal(logEntry)
+		if err != nil {
+			_, _ = fmt.Fprintf(i.writer, "Error marshaling log: %v", err)
+			return
+		}
 	}
 
 	_, _ = fmt.Fprintln(i.writer, string(jsonLog))
