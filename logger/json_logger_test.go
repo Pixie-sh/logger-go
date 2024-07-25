@@ -16,12 +16,27 @@ type container struct {
 	Inner *container
 }
 
+type errorStruct struct {
+	Msg      string `json:"msg"`
+	Field    string `json:"field"`
+	pvtField string `json:"pvtfield"`
+}
+
+func (receiver errorStruct) Error() string {
+	return "THIS IS WRONG"
+}
+
 func TestLogger(t *testing.T) {
 	logger, _ := NewJsonLogger(context.Background(), os.Stdout, "MyApp", "MainScope", "", DEBUG, []string{TraceID})
 	logger.Log("This is a log message")
 
 	fmt.Println("-------------")
-	logger.With("userID", 123).Error("This is an error with userID")
+	logger.With("userID", 123).With("error", fmt.Errorf("UserID is wrong")).Error("This is an error with userID")
+	logger.With("userID", 123).With("error", errorStruct{
+		Msg:      "UserID is wrong",
+		Field:    "User.ID",
+		pvtField: "un seen field",
+	}).Error("This is an error with userID using an error struct")
 
 	fmt.Println("-------------")
 	log := logger.With("A", container{Test: "A inner", Inner: &container{Test: "B inner"}})

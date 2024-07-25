@@ -7,6 +7,7 @@ import (
 	"github.com/pixie-sh/logger-go/caller"
 	"github.com/pixie-sh/logger-go/structs"
 	"io"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -95,9 +96,46 @@ func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
 			if v == nil {
 				logEntry[k] = "nil"
 			} else {
-				switch v.(type) {
+				switch v := v.(type) {
 				case error:
-					logEntry[k] = fmt.Sprintf("%+v", v.(error))
+					// Create a map to hold both struct values and error string
+					errorInfo := make(map[string]interface{})
+
+					// Always add the error string
+					errorInfo["errorString"] = v.Error()
+
+					// Try to unwrap the error
+					var innerErr interface{} = v
+					for {
+						u, ok := innerErr.(interface{ Unwrap() error })
+						if !ok {
+							break
+						}
+						innerErr = u.Unwrap()
+						if innerErr == nil {
+							break
+						}
+					}
+
+					// check if it's a fmt.Errorf type
+					if reflect.TypeOf(innerErr).String() != "*errors.errorString" {
+						// for other error types, try reflection
+						errorValue := reflect.ValueOf(innerErr)
+						if errorValue.Kind() == reflect.Ptr {
+							errorValue = errorValue.Elem()
+						}
+						if errorValue.Kind() == reflect.Struct {
+							for i := 0; i < errorValue.NumField(); i++ {
+								field := errorValue.Type().Field(i)
+								if field.IsExported() {
+									errorInfo[field.Name] = errorValue.Field(i).Interface()
+								}
+							}
+						}
+					}
+
+					logEntry[k] = errorInfo
+
 				default:
 					logEntry[k] = v
 				}
