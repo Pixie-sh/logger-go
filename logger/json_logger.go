@@ -49,6 +49,25 @@ func (i *innerJsonLog) WithCtx(ctx context.Context) Interface {
 	return i
 }
 
+func (i *innerJsonLog) Clone() Interface {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+
+	// Create a new map and copy all fields
+	newFields := make(map[string]any, len(i.fields))
+	for k, v := range i.fields {
+		newFields[k] = v
+	}
+
+	// Create a new innerJsonLog with copied fields
+	return &innerJsonLog{
+		JsonLogger:        i.JsonLogger,
+		Ctx:               i.Ctx,
+		fields:            newFields,
+		expectedCtxFields: i.expectedCtxFields,
+	}
+}
+
 // Log logs a message at LOG level.
 func (i *innerJsonLog) Log(format string, args ...any) {
 	i.With("caller", caller.Upper())
@@ -197,48 +216,59 @@ func NewJsonLogger(
 }
 
 // With adds a field to the logger.
-func (l *JsonLogger) With(field string, value any) Interface {
+func (i *JsonLogger) With(field string, value any) Interface {
 	return &innerJsonLog{
-		JsonLogger:        l,
+		JsonLogger:        i,
 		Ctx:               context.Background(),
-		expectedCtxFields: l.expectedCtxFields,
+		expectedCtxFields: i.expectedCtxFields,
 		fields:            map[string]any{field: value},
 	}
 }
 
 // WithCtx adds ctx to fields
-func (l *JsonLogger) WithCtx(ctx context.Context) Interface {
+func (i *JsonLogger) WithCtx(ctx context.Context) Interface {
 	return &innerJsonLog{
-		JsonLogger:        l,
+		JsonLogger:        i,
 		Ctx:               ctx,
-		expectedCtxFields: l.expectedCtxFields,
+		expectedCtxFields: i.expectedCtxFields,
 		fields:            map[string]any{},
 	}
 }
 
+func (i *JsonLogger) Clone() Interface {
+	return &JsonLogger{
+		App:               i.App,
+		Scope:             i.Scope,
+		UID:               i.UID,
+		LogLevel:          i.LogLevel,
+		writer:            i.writer,
+		expectedCtxFields: i.expectedCtxFields,
+	}
+}
+
 // Log logs a message at LOG level.
-func (l *JsonLogger) Log(format string, args ...any) {
-	l.log(LOG, caller.Upper(), format, args...)
+func (i *JsonLogger) Log(format string, args ...any) {
+	i.log(LOG, caller.Upper(), format, args...)
 }
 
 // Error logs a message at ERROR level.
-func (l *JsonLogger) Error(format string, args ...any) {
-	l.log(ERROR, caller.Upper(), format, args...)
+func (i *JsonLogger) Error(format string, args ...any) {
+	i.log(ERROR, caller.Upper(), format, args...)
 }
 
 // Warn logs a message at WARN level.
-func (l *JsonLogger) Warn(format string, args ...any) {
-	l.log(WARN, caller.Upper(), format, args...)
+func (i *JsonLogger) Warn(format string, args ...any) {
+	i.log(WARN, caller.Upper(), format, args...)
 }
 
 // Debug logs a message at DEBUG level.
-func (l *JsonLogger) Debug(format string, args ...any) {
-	l.log(DEBUG, caller.Upper(), format, args...)
+func (i *JsonLogger) Debug(format string, args ...any) {
+	i.log(DEBUG, caller.Upper(), format, args...)
 }
 
 // log is an internal method to log messages with structured logging.
-func (l *JsonLogger) log(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
-	if l.LogLevel < level {
+func (i *JsonLogger) log(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
+	if i.LogLevel < level {
 		return
 	}
 
@@ -251,20 +281,20 @@ func (l *JsonLogger) log(level LogLevelEnum, call caller.Ptr, format string, arg
 		"caller":    call,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"level":     level.String(),
-		"app":       l.App,
-		"scope":     l.Scope,
+		"app":       i.App,
+		"scope":     i.Scope,
 		"message":   msg,
 	}
 
-	if l.UID != "" {
-		logEntry["uid"] = l.UID
+	if i.UID != "" {
+		logEntry["uid"] = i.UID
 	}
 
 	jsonLog, err := json.Marshal(logEntry)
 	if err != nil {
-		_, _ = fmt.Fprintf(l.writer, "Error marshaling log: %v", err)
+		_, _ = fmt.Fprintf(i.writer, "Error marshaling log: %v", err)
 		return
 	}
 
-	_, _ = fmt.Fprintln(l.writer, *structs.UnsafeString(jsonLog))
+	_, _ = fmt.Fprintln(i.writer, *structs.UnsafeString(jsonLog))
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"os"
 	"strings"
 	"sync"
@@ -119,4 +120,152 @@ func TestSharedInnerJsonLogConcurrency(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestInnerJsonLogClone(t *testing.T) {
+	// Create a buffer to capture log output
+	buf := new(bytes.Buffer)
+
+	// Create a base JsonLogger
+	baseLogger, _ := NewJsonLogger(context.Background(), buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
+
+	// Create an innerJsonLog
+	inner := &innerJsonLog{
+		JsonLogger:        baseLogger,
+		Ctx:               context.WithValue(context.Background(), "requestID", "12345"),
+		fields:            map[string]any{"field1": "value1"},
+		expectedCtxFields: []string{"requestID"},
+	}
+
+	// Create a segment
+	segment := inner.Clone()
+
+	// Test 1: Ensure segment is a new instance
+	assert.NotSame(t, inner, segment, "Clone should return a new instance")
+
+	// Test 2: Ensure segment has the same initial values
+	segmentInner, ok := segment.(*innerJsonLog)
+	assert.True(t, ok, "Clone should return an *innerJsonLog")
+	assert.Equal(t, inner.JsonLogger, segmentInner.JsonLogger, "JsonLogger should be the same")
+	assert.Equal(t, inner.Ctx, segmentInner.Ctx, "Context should be the same")
+	assert.Equal(t, inner.expectedCtxFields, segmentInner.expectedCtxFields, "Expected context fields should be the same")
+	assert.Equal(t, inner.fields, segmentInner.fields, "Fields should be initially the same")
+
+	// Test 3: Ensure modifications to segment don't affect original
+	segment.With("field2", "value2")
+	assert.NotContains(t, inner.fields, "field2", "Original should not contain new field")
+	assert.Contains(t, segmentInner.fields, "field2", "Clone should contain new field")
+
+	// Test 4: Log with both and check output
+	inner.Log("Inner log")
+	segment.Log("Clone log")
+
+	logLines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
+	assert.Len(t, logLines, 2, "Should have two log lines")
+
+	var log1, log2 map[string]interface{}
+	_ = json.Unmarshal(logLines[0], &log1)
+	_ = json.Unmarshal(logLines[1], &log2)
+
+	assert.Equal(t, "Inner log", log1["message"])
+	assert.Equal(t, "Clone log", log2["message"])
+	assert.Contains(t, log2, "field2")
+	assert.NotContains(t, log1, "field2")
+}
+
+func TestJsonLoggerClone(t *testing.T) {
+	// Create a buffer to capture log output
+	buf := new(bytes.Buffer)
+
+	// Create a base JsonLogger
+	baseLogger, _ := NewJsonLogger(context.Background(), buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
+
+	// Create a segment
+	segment := baseLogger.Clone()
+
+	// Test 1: Ensure segment is a new instance
+	assert.NotSame(t, baseLogger, segment, "Clone should return a new instance")
+
+	// Test 2: Ensure segment has the same properties
+	segmentLogger, ok := segment.(*JsonLogger)
+	assert.True(t, ok, "Clone should return a *JsonLogger")
+	assert.Equal(t, baseLogger.App, segmentLogger.App, "App should be the same")
+	assert.Equal(t, baseLogger.Scope, segmentLogger.Scope, "Scope should be the same")
+	assert.Equal(t, baseLogger.UID, segmentLogger.UID, "UID should be the same")
+	assert.Equal(t, baseLogger.LogLevel, segmentLogger.LogLevel, "LogLevel should be the same")
+	assert.Equal(t, baseLogger.writer, segmentLogger.writer, "Writer should be the same")
+	assert.Equal(t, baseLogger.expectedCtxFields, segmentLogger.expectedCtxFields, "Expected context fields should be the same")
+
+	// Test 3: Ensure modifications to segment don't affect original
+	modifiedClone := segment.With("field", "value")
+	baseLogger.Log("Base log")
+	modifiedClone.Log("Modified segment log")
+
+	logLines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
+	assert.Len(t, logLines, 2, "Should have two log lines")
+
+	var log1, log2 map[string]interface{}
+	_ = json.Unmarshal(logLines[0], &log1)
+	_ = json.Unmarshal(logLines[1], &log2)
+
+	assert.Equal(t, "Base log", log1["message"])
+	assert.Equal(t, "Modified segment log", log2["message"])
+	assert.Contains(t, log2, "field")
+	assert.NotContains(t, log1, "field")
+}
+func TestSegmentWithAndWithCtx(t *testing.T) {
+	// Create a buffer to capture log output
+	buf := new(bytes.Buffer)
+
+	// Create a base JsonLogger
+	baseLogger, _ := NewJsonLogger(context.Background(), buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID", "userID"})
+
+	// Create an initial context
+	initialCtx := context.WithValue(context.Background(), "requestID", "initial-request-id")
+
+	// Add some initial fields and context to the base logger
+	baseWithFields := baseLogger.With("initialField", "initialValue").WithCtx(initialCtx)
+
+	// Create a segment from the base logger with fields
+	segment := baseWithFields.Clone()
+
+	// Modify the segment with new field and context
+	newCtx := context.WithValue(context.Background(), "userID", "new-user-id")
+	modifiedSegment := segment.With("newField", "newValue").WithCtx(newCtx)
+
+	// Log with both the original and modified segment
+	baseWithFields.Log("Original log")
+	modifiedSegment.Log("Modified segment log")
+
+	// Parse the log output
+	logLines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
+	assert.Len(t, logLines, 2, "Should have two log lines")
+
+	var originalLog, modifiedLog map[string]interface{}
+	json.Unmarshal(logLines[0], &originalLog)
+	json.Unmarshal(logLines[1], &modifiedLog)
+
+	// Test assertions
+	assert.Equal(t, "Original log", originalLog["message"], "Original log message should be correct")
+	assert.Equal(t, "Modified segment log", modifiedLog["message"], "Modified segment log message should be correct")
+
+	// Check fields
+	assert.Equal(t, "initialValue", originalLog["initialField"], "Original log should contain initial field")
+	assert.NotContains(t, originalLog, "newField", "Original log should not contain new field")
+
+	assert.Equal(t, "initialValue", modifiedLog["initialField"], "Modified log should contain initial field")
+	assert.Equal(t, "newValue", modifiedLog["newField"], "Modified log should contain new field")
+
+	// Check context
+	originalCtx, originalCtxOk := originalLog["ctx"].(map[string]interface{})
+	modifiedCtx, modifiedCtxOk := modifiedLog["ctx"].(map[string]interface{})
+
+	assert.True(t, originalCtxOk, "Original log should have a context")
+	assert.True(t, modifiedCtxOk, "Modified log should have a context")
+
+	assert.Equal(t, "initial-request-id", originalCtx["requestID"], "Original log should have initial requestID")
+	assert.NotContains(t, originalCtx, "userID", "Original log should not contain userID")
+
+	assert.Equal(t, nil, modifiedCtx["requestID"], "Modified log should have initial requestID")
+	assert.Equal(t, "new-user-id", modifiedCtx["userID"], "Modified log should have new userID")
 }

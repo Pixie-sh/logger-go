@@ -30,6 +30,7 @@ func (l LogLevelEnum) String() string {
 
 // Interface LoggerInterface represents the basic logging interface.
 type Interface interface {
+	Clone() Interface
 	WithCtx(ctx context.Context) Interface
 	With(field string, value any) Interface
 	Log(format string, args ...any)
