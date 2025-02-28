@@ -2,24 +2,34 @@ package logger
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/pixie-sh/logger-go/caller"
-	"github.com/pixie-sh/logger-go/structs"
+	"github.com/goccy/go-json"
 	"io"
-	"reflect"
 	"sync"
-	"time"
+
+	"github.com/pixie-sh/logger-go/caller"
 )
+
+type ParserFn = func(
+	level LogLevelEnum,
+	app string,
+	scope string,
+	expandedMsg string,
+	logUID string,
+	ctxLog any,
+	fields map[string]any,
+) map[string]any
 
 // JsonLogger represents a logger that outputs JSON logs.
 type JsonLogger struct {
-	App               string
-	Scope             string
-	UID               string
-	LogLevel          LogLevelEnum
+	App      string
+	Scope    string
+	UID      string
+	LogLevel LogLevelEnum
+
 	writer            io.Writer
 	expectedCtxFields []string
+	parser            ParserFn
 }
 
 // innerJsonLog represents a logger with additional fields.
@@ -28,8 +38,10 @@ type innerJsonLog struct {
 
 	mu                sync.RWMutex
 	Ctx               context.Context
-	fields            map[string]any
 	expectedCtxFields []string
+
+	fields map[string]any
+	parser ParserFn
 }
 
 func (i *innerJsonLog) With(field string, value any) Interface {
@@ -64,6 +76,7 @@ func (i *innerJsonLog) Clone() Interface {
 		JsonLogger:        i.JsonLogger,
 		Ctx:               i.Ctx,
 		fields:            newFields,
+		parser:            i.parser,
 		expectedCtxFields: i.expectedCtxFields,
 	}
 }
@@ -98,96 +111,34 @@ func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
 		return
 	}
 
-	var logEntry = make(map[string]any)
-	var jsonLog []byte
-	var err error
 	var msg = format
-
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
 
-	{
-		i.mu.RLock()
-		defer i.mu.RUnlock()
+	var parser = DefaultJSONParser
+	if i.parser != nil {
+		parser = i.parser
+	}
 
-		for k, v := range i.fields {
-			if v == nil {
-				logEntry[k] = "nil"
-			} else {
-				switch v := v.(type) {
-				case error:
-					// Create a map to hold both struct values and error string
-					errorInfo := make(map[string]interface{})
-
-					// Always add the error string
-					errorInfo["errorString"] = v.Error()
-
-					// Try to unwrap the error
-					var innerErr interface{} = v
-					for {
-						u, ok := innerErr.(interface{ Unwrap() error })
-						if !ok {
-							break
-						}
-						innerErr = u.Unwrap()
-						if innerErr == nil {
-							break
-						}
-					}
-
-					// check if it's a fmt.Errorf type
-					if reflect.TypeOf(innerErr).String() != "*errors.errorString" {
-						// for other error types, try reflection
-						errorValue := reflect.ValueOf(innerErr)
-						if errorValue.Kind() == reflect.Ptr {
-							errorValue = errorValue.Elem()
-						}
-						if errorValue.Kind() == reflect.Struct {
-							for i := 0; i < errorValue.NumField(); i++ {
-								field := errorValue.Type().Field(i)
-								if field.IsExported() {
-									errorInfo[field.Name] = errorValue.Field(i).Interface()
-								}
-							}
-						}
-					}
-
-					logEntry[k] = errorInfo
-
-				default:
-					logEntry[k] = v
-				}
-			}
-		}
-
-		logEntry["timestamp"] = time.Now().Format(time.RFC3339)
-		logEntry["level"] = level.String()
-		logEntry["app"] = i.App
-		logEntry["scope"] = i.Scope
-		logEntry["message"] = msg
-
-		if i.UID != "" {
-			logEntry["uid"] = i.UID
-		}
-
-		if i.Ctx != nil {
-			logEntry["ctx"] = i.ctxLog(i.Ctx)
-		}
-
-		jsonLog, err = json.Marshal(logEntry)
-		if err != nil {
-			_, _ = fmt.Fprintf(i.writer, "Error marshaling log: %v", err)
-			return
-		}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	logEntry := parser(level, i.App, i.Scope, msg, i.UID, i.ctxLog(i.Ctx), i.fields)
+	jsonLog, err := json.Marshal(logEntry)
+	if err != nil {
+		_, _ = fmt.Fprintf(i.writer, "error marshaling log: %v; %+v", err, logEntry)
+		return
 	}
 
 	_, _ = fmt.Fprintln(i.writer, string(jsonLog))
 }
 
 func (i *innerJsonLog) ctxLog(ctx context.Context) any {
-	ctxFields := map[string]any{}
+	if ctx == nil {
+		return nil
+	}
 
+	ctxFields := map[string]any{}
 	for _, cf := range i.expectedCtxFields {
 		val := ctx.Value(cf)
 		if val != nil {
@@ -204,13 +155,19 @@ func NewJsonLogger(
 	writer io.Writer,
 	app, scope, uid string,
 	logLevel LogLevelEnum,
-	expectedCtxFields []string) (*JsonLogger, error) {
+	expectedCtxFields []string, parserFn ...ParserFn) (*JsonLogger, error) {
+	parser := DefaultJSONParser
+	if len(parserFn) > 0 && parserFn[0] != nil {
+		parser = parserFn[0]
+	}
+
 	return &JsonLogger{
 		App:               app,
 		Scope:             scope,
 		UID:               uid,
 		LogLevel:          logLevel,
 		writer:            writer,
+		parser:            parser,
 		expectedCtxFields: expectedCtxFields,
 	}, nil
 }
@@ -221,6 +178,7 @@ func (i *JsonLogger) With(field string, value any) Interface {
 		JsonLogger:        i,
 		Ctx:               context.Background(),
 		expectedCtxFields: i.expectedCtxFields,
+		parser:            i.parser,
 		fields:            map[string]any{field: value},
 	}
 }
@@ -231,6 +189,7 @@ func (i *JsonLogger) WithCtx(ctx context.Context) Interface {
 		JsonLogger:        i,
 		Ctx:               ctx,
 		expectedCtxFields: i.expectedCtxFields,
+		parser:            i.parser,
 		fields:            map[string]any{},
 	}
 }
@@ -243,6 +202,7 @@ func (i *JsonLogger) Clone() Interface {
 		LogLevel:          i.LogLevel,
 		writer:            i.writer,
 		expectedCtxFields: i.expectedCtxFields,
+		parser:            i.parser,
 	}
 }
 
@@ -272,29 +232,22 @@ func (i *JsonLogger) log(level LogLevelEnum, call caller.Ptr, format string, arg
 		return
 	}
 
-	msg := format
+	var msg = format
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
 
-	logEntry := map[string]any{
-		"caller":    call,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"level":     level.String(),
-		"app":       i.App,
-		"scope":     i.Scope,
-		"message":   msg,
+	var parser = DefaultJSONParser
+	if i.parser != nil {
+		parser = i.parser
 	}
 
-	if i.UID != "" {
-		logEntry["uid"] = i.UID
-	}
-
+	logEntry := parser(level, i.App, i.Scope, msg, i.UID, nil, nil)
 	jsonLog, err := json.Marshal(logEntry)
 	if err != nil {
-		_, _ = fmt.Fprintf(i.writer, "Error marshaling log: %v", err)
+		_, _ = fmt.Fprintf(i.writer, "error marshaling log: %v; %+v", err, logEntry)
 		return
 	}
 
-	_, _ = fmt.Fprintln(i.writer, *structs.UnsafeString(jsonLog))
+	_, _ = fmt.Fprintln(i.writer, string(jsonLog))
 }
