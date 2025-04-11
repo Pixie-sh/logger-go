@@ -3,10 +3,10 @@ package logger
 import (
 	"context"
 	"fmt"
-	"github.com/goccy/go-json"
 	"io"
 	"sync"
 
+	"github.com/goccy/go-json"
 	"github.com/pixie-sh/logger-go/caller"
 )
 
@@ -20,8 +20,8 @@ type ParserFn = func(
 	fields map[string]any,
 ) map[string]any
 
-// JsonLogger represents a logger that outputs JSON logs.
-type JsonLogger struct {
+// logger represents a logger that outputs JSON logs.
+type logger struct {
 	App      string
 	Scope    string
 	UID      string
@@ -32,9 +32,9 @@ type JsonLogger struct {
 	parser            ParserFn
 }
 
-// innerJsonLog represents a logger with additional fields.
-type innerJsonLog struct {
-	*JsonLogger
+// innerLogger represents a logger with additional fields.
+type innerLogger struct {
+	*logger
 
 	mu                sync.RWMutex
 	Ctx               context.Context
@@ -44,7 +44,7 @@ type innerJsonLog struct {
 	parser ParserFn
 }
 
-func (i *innerJsonLog) With(field string, value any) Interface {
+func (i *innerLogger) With(field string, value any) Interface {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -53,7 +53,7 @@ func (i *innerJsonLog) With(field string, value any) Interface {
 }
 
 // WithCtx adds ctx to fields
-func (i *innerJsonLog) WithCtx(ctx context.Context) Interface {
+func (i *innerLogger) WithCtx(ctx context.Context) Interface {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -61,7 +61,7 @@ func (i *innerJsonLog) WithCtx(ctx context.Context) Interface {
 	return i
 }
 
-func (i *innerJsonLog) Clone() Interface {
+func (i *innerLogger) Clone() Interface {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
@@ -71,9 +71,9 @@ func (i *innerJsonLog) Clone() Interface {
 		newFields[k] = v
 	}
 
-	// Create a new innerJsonLog with copied fields
-	return &innerJsonLog{
-		JsonLogger:        i.JsonLogger,
+	// Create a new innerLogger with copied fields
+	return &innerLogger{
+		logger:            i.logger,
 		Ctx:               i.Ctx,
 		fields:            newFields,
 		parser:            i.parser,
@@ -82,31 +82,31 @@ func (i *innerJsonLog) Clone() Interface {
 }
 
 // Log logs a message at LOG level.
-func (i *innerJsonLog) Log(format string, args ...any) {
+func (i *innerLogger) Log(format string, args ...any) {
 	i.With("caller", caller.Upper())
 	i.log(LOG, format, args...)
 }
 
 // Error logs a message at ERROR level.
-func (i *innerJsonLog) Error(format string, args ...any) {
+func (i *innerLogger) Error(format string, args ...any) {
 	i.With("caller", caller.Upper())
 	i.log(ERROR, format, args...)
 }
 
 // Warn logs a message at WARN level.
-func (i *innerJsonLog) Warn(format string, args ...any) {
+func (i *innerLogger) Warn(format string, args ...any) {
 	i.With("caller", caller.Upper())
 	i.log(WARN, format, args...)
 }
 
 // Debug logs a message at DEBUG level.
-func (i *innerJsonLog) Debug(format string, args ...any) {
+func (i *innerLogger) Debug(format string, args ...any) {
 	i.With("caller", caller.Upper())
 	i.log(DEBUG, format, args...)
 }
 
 // log is an internal method to log messages with structured logging.
-func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
+func (i *innerLogger) log(level LogLevelEnum, format string, args ...any) {
 	if i.LogLevel < level {
 		return
 	}
@@ -133,7 +133,7 @@ func (i *innerJsonLog) log(level LogLevelEnum, format string, args ...any) {
 	_, _ = fmt.Fprintln(i.writer, string(jsonLog))
 }
 
-func (i *innerJsonLog) ctxLog(ctx context.Context) any {
+func (i *innerLogger) ctxLog(ctx context.Context) any {
 	if ctx == nil {
 		return nil
 	}
@@ -149,19 +149,19 @@ func (i *innerJsonLog) ctxLog(ctx context.Context) any {
 	return ctxFields
 }
 
-// NewJsonLogger creates a new JsonLogger with default values.
-func NewJsonLogger(
+// NewLogger creates a new logger with default values.
+func NewLogger(
 	_ context.Context,
 	writer io.Writer,
 	app, scope, uid string,
 	logLevel LogLevelEnum,
-	expectedCtxFields []string, parserFn ...ParserFn) (*JsonLogger, error) {
+	expectedCtxFields []string, parserFn ...ParserFn) (*logger, error) {
 	parser := DefaultJSONParser
 	if len(parserFn) > 0 && parserFn[0] != nil {
 		parser = parserFn[0]
 	}
 
-	return &JsonLogger{
+	return &logger{
 		App:               app,
 		Scope:             scope,
 		UID:               uid,
@@ -173,9 +173,9 @@ func NewJsonLogger(
 }
 
 // With adds a field to the logger.
-func (i *JsonLogger) With(field string, value any) Interface {
-	return &innerJsonLog{
-		JsonLogger:        i,
+func (i *logger) With(field string, value any) Interface {
+	return &innerLogger{
+		logger:            i,
 		Ctx:               context.Background(),
 		expectedCtxFields: i.expectedCtxFields,
 		parser:            i.parser,
@@ -184,9 +184,9 @@ func (i *JsonLogger) With(field string, value any) Interface {
 }
 
 // WithCtx adds ctx to fields
-func (i *JsonLogger) WithCtx(ctx context.Context) Interface {
-	return &innerJsonLog{
-		JsonLogger:        i,
+func (i *logger) WithCtx(ctx context.Context) Interface {
+	return &innerLogger{
+		logger:            i,
 		Ctx:               ctx,
 		expectedCtxFields: i.expectedCtxFields,
 		parser:            i.parser,
@@ -194,8 +194,8 @@ func (i *JsonLogger) WithCtx(ctx context.Context) Interface {
 	}
 }
 
-func (i *JsonLogger) Clone() Interface {
-	return &JsonLogger{
+func (i *logger) Clone() Interface {
+	return &logger{
 		App:               i.App,
 		Scope:             i.Scope,
 		UID:               i.UID,
@@ -207,27 +207,27 @@ func (i *JsonLogger) Clone() Interface {
 }
 
 // Log logs a message at LOG level.
-func (i *JsonLogger) Log(format string, args ...any) {
+func (i *logger) Log(format string, args ...any) {
 	i.log(LOG, caller.Upper(), format, args...)
 }
 
 // Error logs a message at ERROR level.
-func (i *JsonLogger) Error(format string, args ...any) {
+func (i *logger) Error(format string, args ...any) {
 	i.log(ERROR, caller.Upper(), format, args...)
 }
 
 // Warn logs a message at WARN level.
-func (i *JsonLogger) Warn(format string, args ...any) {
+func (i *logger) Warn(format string, args ...any) {
 	i.log(WARN, caller.Upper(), format, args...)
 }
 
 // Debug logs a message at DEBUG level.
-func (i *JsonLogger) Debug(format string, args ...any) {
+func (i *logger) Debug(format string, args ...any) {
 	i.log(DEBUG, caller.Upper(), format, args...)
 }
 
 // log is an internal method to log messages with structured logging.
-func (i *JsonLogger) log(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
+func (i *logger) log(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
 	if i.LogLevel < level {
 		return
 	}

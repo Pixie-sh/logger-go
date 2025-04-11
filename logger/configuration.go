@@ -30,7 +30,7 @@ func createJSONLogger(ctx context.Context, generic Configuration) (Interface, er
 		cfg.Writer = os.Stdout //default
 	}
 
-	return NewJsonLogger(ctx, cfg.Writer, generic.App, generic.Scope, generic.UID, generic.LogLevel, append(generic.ExpectedCtxFields, TraceID))
+	return NewLogger(ctx, cfg.Writer, generic.App, generic.Scope, generic.UID, generic.LogLevel, append(generic.ExpectedCtxFields, TraceID))
 }
 
 // Configuration  logger generic config

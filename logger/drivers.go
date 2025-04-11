@@ -14,7 +14,7 @@ var DefaultJSONParser ParserFn = func(
 	app string,
 	scope string,
 	expandedMsg string,
-	logUID string,
+	logVersion string,
 	ctxLog any,
 	fields map[string]any,
 ) map[string]any {
@@ -78,8 +78,8 @@ var DefaultJSONParser ParserFn = func(
 	logEntry["scope"] = scope
 	logEntry["message"] = expandedMsg
 
-	if logUID != "" {
-		logEntry["uid"] = logUID
+	if logVersion != "" {
+		logEntry["version"] = logVersion
 	}
 
 	if ctxLog != nil {
