@@ -27,20 +27,16 @@ var DefaultTextParser = func(
 ) []byte {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
-	logLine := fmt.Sprintf("[%s] msg: %s | %s | %s | %s",
+	logLine := fmt.Sprintf("[%s][%s]$_ %s {%s,%s,%s}",
+		timestamp,
 		level.String(),
 		expandedMsg,
 		scope,
 		app,
-		timestamp,
+		logVersion,
 	)
 
-	if logVersion != "" {
-		logLine += fmt.Sprintf(" | %s", logVersion)
-	}
-
 	if len(fields) > 0 {
-		logLine += "\n  Fields:"
 		keys := make([]string, 0, len(fields))
 		for k := range fields {
 			keys = append(keys, k)
@@ -50,120 +46,84 @@ var DefaultTextParser = func(
 		for _, k := range keys {
 			v := fields[k]
 			if v == nil {
-				logLine += fmt.Sprintf("\n    %s: nil", k)
+				logLine += fmt.Sprintf("\n  Fields.%s: nil", k)
 			} else if err, ok := v.(error); ok {
-				logLine += fmt.Sprintf("\n    %s: ERROR - %s", k, err.Error())
+				logLine += fmt.Sprintf("\n  Fields.%s: \"%s\"", k, err.Error())
 			} else {
-				logLine += fmt.Sprintf("\n    %s: %s", k, formatValueForText(v))
+				// Check if it's a struct or map to flatten it
+				switch reflect.ValueOf(v).Kind() {
+				case reflect.Struct, reflect.Map, reflect.Ptr:
+					flattenAndAppendFields(k, v, &logLine, "Fields")
+				default:
+					logLine += fmt.Sprintf("\n  Fields.%s: %s", k, formatValueForText(v))
+				}
 			}
 		}
 	}
 
 	if ctxLog != nil {
-		logLine += "\n  Context:"
-		ctxValue := reflect.ValueOf(ctxLog)
-		if ctxValue.Kind() == reflect.Ptr {
-			ctxValue = ctxValue.Elem()
-		}
-
-		if ctxValue.Kind() == reflect.Struct {
-			for i := 0; i < ctxValue.NumField(); i++ {
-				field := ctxValue.Type().Field(i)
-				if field.IsExported() {
-					logLine += fmt.Sprintf("\n    %s: %v", field.Name, ctxValue.Field(i).Interface())
-				}
+		// For context, we want to flatten the map
+		if mapCtx, ok := ctxLog.(map[string]interface{}); ok {
+			keys := make([]string, 0, len(mapCtx))
+			for k := range mapCtx {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				v := mapCtx[k]
+				logLine += fmt.Sprintf("\n  Context.%s: %s", k, formatValueForText(v))
 			}
 		} else {
-			logLine += fmt.Sprintf("\n    %v", ctxLog)
+			logLine += fmt.Sprintf("\n  Context: %v", formatValueForText(ctxLog))
 		}
 	}
 
-	return structs.UnsafeBytes(logLine + "\n")
+	return structs.UnsafeBytes(logLine)
 }
 
-var DefaultJSONParser = func(
-	level LogLevelEnum,
-	app string,
-	scope string,
-	expandedMsg string,
-	logVersion string,
-	ctxLog any,
-	fields map[string]any,
-) []byte {
-	var logEntry = make(map[string]any)
+// Helper function to flatten nested structures
+func flattenAndAppendFields(key string, value interface{}, logLine *string, prefix string) {
+	v := reflect.ValueOf(value)
 
-	if fields != nil {
-		for k, v := range fields {
-			if v == nil {
-				logEntry[k] = "nil"
-			} else {
-				switch v := v.(type) {
-				case error:
-					// Create a map to hold both struct values and error string
-					errorInfo := make(map[string]interface{})
+	// If it's a pointer, get the underlying value
+	if v.Kind() == reflect.Ptr && !v.IsNil() {
+		v = v.Elem()
+	}
 
-					// Always add the error string
-					errorInfo["error.string"] = v.Error()
+	// Process based on kind
+	switch v.Kind() {
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Type().Field(i)
+			if field.IsExported() {
+				fieldValue := v.Field(i).Interface()
+				fieldKey := fmt.Sprintf("%s.%s.%s", prefix, key, field.Name)
 
-					// Try to unwrap the error
-					var innerErr interface{} = v
-					for {
-						u, ok := innerErr.(interface{ Unwrap() error })
-						if !ok {
-							break
-						}
-						innerErr = u.Unwrap()
-						if innerErr == nil {
-							break
-						}
-					}
-
-					// check if it's a fmt.Errorf type
-					if reflect.TypeOf(innerErr).String() != "*errors.errorString" {
-						// for other error types, try reflection
-						errorValue := reflect.ValueOf(innerErr)
-						if errorValue.Kind() == reflect.Ptr {
-							errorValue = errorValue.Elem()
-						}
-						if errorValue.Kind() == reflect.Struct {
-							for i := 0; i < errorValue.NumField(); i++ {
-								field := errorValue.Type().Field(i)
-								if field.IsExported() {
-									errorInfo[field.Name] = errorValue.Field(i).Interface()
-								}
-							}
-						}
-					}
-
-					logEntry[k] = errorInfo
-
-				default:
-					logEntry[k] = v
+				// Check if field value is itself a struct
+				if reflect.ValueOf(fieldValue).Kind() == reflect.Struct ||
+					(reflect.ValueOf(fieldValue).Kind() == reflect.Ptr && !reflect.ValueOf(fieldValue).IsNil()) {
+					flattenAndAppendFields(key+"."+field.Name, fieldValue, logLine, prefix)
+				} else {
+					*logLine += fmt.Sprintf("\n  %s: %s", fieldKey, formatValueForText(fieldValue))
 				}
 			}
 		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			mapValue := v.MapIndex(k).Interface()
+			mapKey := fmt.Sprintf("%s.%s.%s", prefix, key, k.String())
+
+			if reflect.ValueOf(mapValue).Kind() == reflect.Struct ||
+				reflect.ValueOf(mapValue).Kind() == reflect.Map ||
+				(reflect.ValueOf(mapValue).Kind() == reflect.Ptr && !reflect.ValueOf(mapValue).IsNil()) {
+				flattenAndAppendFields(key+"."+k.String(), mapValue, logLine, prefix)
+			} else {
+				*logLine += fmt.Sprintf("\n  %s: %s", mapKey, formatValueForText(mapValue))
+			}
+		}
+	default:
+		*logLine += fmt.Sprintf("\n  %s.%s: %s", prefix, key, formatValueForText(value))
 	}
-
-	logEntry["timestamp"] = time.Now().Format(time.RFC3339)
-	logEntry["level"] = level.String()
-	logEntry["app"] = app
-	logEntry["scope"] = scope
-	logEntry["message"] = expandedMsg
-
-	if logVersion != "" {
-		logEntry["version"] = logVersion
-	}
-
-	if ctxLog != nil {
-		logEntry["ctx"] = ctxLog
-	}
-
-	blob, err := json.Marshal(logEntry)
-	if err != nil {
-		return structs.UnsafeBytes(fmt.Sprintf("error marshaling log: %v; %+v", err, logEntry))
-	}
-
-	return blob
 }
 
 // Add this helper function to your code
@@ -260,4 +220,86 @@ func formatValueForText(value interface{}) string {
 		// Default fallback
 		return fmt.Sprintf("%+v", v)
 	}
+}
+
+var DefaultJSONParser = func(
+	level LogLevelEnum,
+	app string,
+	scope string,
+	expandedMsg string,
+	logVersion string,
+	ctxLog any,
+	fields map[string]any,
+) []byte {
+	var logEntry = make(map[string]any)
+
+	if fields != nil {
+		for k, v := range fields {
+			if v == nil {
+				logEntry[k] = "nil"
+			} else {
+				switch v := v.(type) {
+				case error:
+					// Create a map to hold both struct values and error string
+					errorInfo := make(map[string]interface{})
+
+					// Always add the error string
+					errorInfo["error.string"] = v.Error()
+
+					// Try to unwrap the error
+					var innerErr interface{} = v
+					for {
+						u, ok := innerErr.(interface{ Unwrap() error })
+						if !ok {
+							break
+						}
+						innerErr = u.Unwrap()
+						if innerErr == nil {
+							break
+						}
+					}
+
+					// check if it's a fmt.Errorf type
+					if reflect.TypeOf(innerErr).String() != "*errors.errorString" {
+						// for other error types, try reflection
+						errorValue := reflect.ValueOf(innerErr)
+						if errorValue.Kind() == reflect.Ptr {
+							errorValue = errorValue.Elem()
+						}
+						if errorValue.Kind() == reflect.Struct {
+							for i := 0; i < errorValue.NumField(); i++ {
+								field := errorValue.Type().Field(i)
+								if field.IsExported() {
+									errorInfo[field.Name] = errorValue.Field(i).Interface()
+								}
+							}
+						}
+					}
+
+					logEntry[k] = errorInfo
+
+				default:
+					logEntry[k] = v
+				}
+			}
+		}
+	}
+
+	logEntry["timestamp"] = time.Now().Format(time.RFC3339)
+	logEntry["level"] = level.String()
+	logEntry["app"] = app
+	logEntry["scope"] = scope
+	logEntry["message"] = expandedMsg
+	logEntry["version"] = logVersion
+
+	if ctxLog != nil {
+		logEntry["ctx"] = ctxLog
+	}
+
+	blob, err := json.Marshal(logEntry)
+	if err != nil {
+		return structs.UnsafeBytes(fmt.Sprintf("error marshaling log: %v; %+v", err, logEntry))
+	}
+
+	return blob
 }

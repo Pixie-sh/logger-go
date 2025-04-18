@@ -13,11 +13,16 @@ import (
 var Logger Interface
 
 func init() {
+	scope := env.EnvScope()
+	if len(scope) == 0 {
+		scope = "-"
+	}
+
 	Logger, _ = NewLogger(
 		context.Background(),
 		os.Stdout,
 		fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
-		env.EnvScope(),
+		scope,
 		fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
 		func() LogLevelEnum {
 			switch env.EnvLogLevel() {
@@ -31,10 +36,11 @@ func init() {
 				return LOG
 			}
 		}(),
-		[]string{TraceID})
+		[]string{TraceID},
+	)
 }
 
-func Clone() Interface{
+func Clone() Interface {
 	must(Logger)
 	return Logger.Clone()
 }
@@ -45,32 +51,32 @@ func must(l Interface) {
 	}
 }
 
-func WithCtx(ctx context.Context) Interface{
+func WithCtx(ctx context.Context) Interface {
 	must(Logger)
 	return Logger.WithCtx(ctx)
 }
 
-func With(field string, value any) Interface{
+func With(field string, value any) Interface {
 	must(Logger)
 	return Logger.With(field, value)
 }
 
-func Log(format string, args ...any){
+func Log(format string, args ...any) {
 	must(Logger)
 	Logger.Log(format, args...)
 }
 
-func Error(format string, args ...any){
+func Error(format string, args ...any) {
 	must(Logger)
 	Logger.Error(format, args...)
 }
 
-func Warn(format string, args ...any){
+func Warn(format string, args ...any) {
 	must(Logger)
 	Logger.Warn(format, args...)
 }
 
-func Debug(format string, args ...any){
+func Debug(format string, args ...any) {
 	must(Logger)
 	Logger.Debug(format, args...)
 }
