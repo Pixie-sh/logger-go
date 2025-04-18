@@ -17,6 +17,9 @@ const Scope = "SCOPE"
 // DebugMode mode
 const DebugMode = "DEBUG_MODE"
 
+// LogParser mode
+const LogParser = "LOG_PARSER"
+
 // LogLevel mode
 const LogLevel = "LOG_LEVEL"
 
@@ -46,4 +49,9 @@ func EnvAppVersion() string {
 // EnvScope app runtime scope, eg: staging, local, prod
 func EnvScope() string {
 	return os.Getenv(Scope)
+}
+
+// EnvLogParser text | json; json is default
+func EnvLogParser() string {
+	return os.Getenv(LogParser)
 }

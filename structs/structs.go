@@ -19,3 +19,8 @@ func EmptyString() String {
 func UnsafeString(str []byte) String {
 	return ToString(*(*string)(unsafe.Pointer(&str))) //no allocation
 }
+
+// UnsafeBytes returns a byte pointer without allocation.
+func UnsafeBytes(s string) []byte {
+	return unsafe.Slice(unsafe.StringData(s), len(s))
+}

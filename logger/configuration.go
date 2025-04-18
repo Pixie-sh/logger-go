@@ -2,9 +2,10 @@ package logger
 
 import (
 	"context"
-	"github.com/pixie-sh/logger-go/mapper"
 	"io"
 	"os"
+
+	"github.com/pixie-sh/logger-go/mapper"
 )
 
 // FactoryConfiguration defines the required logger factory configuration
@@ -16,6 +17,7 @@ type FactoryConfiguration struct {
 var DefaultFactoryConfiguration = FactoryConfiguration{
 	Mapping: map[string]FactoryCreateFn{
 		JSONLoggerDriver: createJSONLogger,
+		TextLoggerDriver: createTextLogger,
 	},
 }
 
@@ -30,7 +32,39 @@ func createJSONLogger(ctx context.Context, generic Configuration) (Interface, er
 		cfg.Writer = os.Stdout //default
 	}
 
-	return NewLogger(ctx, cfg.Writer, generic.App, generic.Scope, generic.UID, generic.LogLevel, append(generic.ExpectedCtxFields, TraceID))
+	return NewLogger(
+		ctx,
+		cfg.Writer,
+		generic.App,
+		generic.Scope,
+		generic.UID,
+		generic.LogLevel,
+		append(generic.ExpectedCtxFields, TraceID),
+		DefaultJSONParser,
+	)
+}
+
+func createTextLogger(ctx context.Context, generic Configuration) (Interface, error) {
+	var cfg TextLoggerConfiguration
+	err := mapper.ObjectToStruct(generic.Values, &cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.Writer == nil {
+		cfg.Writer = os.Stdout //default
+	}
+
+	return NewLogger(
+		ctx,
+		cfg.Writer,
+		generic.App,
+		generic.Scope,
+		generic.UID,
+		generic.LogLevel,
+		append(generic.ExpectedCtxFields, TraceID),
+		DefaultTextParser,
+	)
 }
 
 // Configuration  logger generic config
@@ -46,5 +80,11 @@ type Configuration struct {
 
 // JSONLoggerConfiguration json logger with specific
 type JSONLoggerConfiguration struct {
+	Writer io.Writer
+}
+
+// TextLoggerConfiguration represents the configuration for a text-based logger.
+// This includes details such as the destination writer for the log output.
+type TextLoggerConfiguration struct {
 	Writer io.Writer
 }

@@ -3,10 +3,11 @@ package logger
 import (
 	"context"
 	"fmt"
+	"github.com/pixie-sh/logger-go/env"
+	"github.com/pixie-sh/logger-go/structs"
 	"io"
 	"sync"
 
-	"github.com/goccy/go-json"
 	"github.com/pixie-sh/logger-go/caller"
 )
 
@@ -18,7 +19,7 @@ type ParserFn = func(
 	logUID string,
 	ctxLog any,
 	fields map[string]any,
-) map[string]any
+) []byte
 
 // logger represents a logger that outputs JSON logs.
 type logger struct {
@@ -124,13 +125,7 @@ func (i *innerLogger) log(level LogLevelEnum, format string, args ...any) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	logEntry := parser(level, i.App, i.Scope, msg, i.UID, i.ctxLog(i.Ctx), i.fields)
-	jsonLog, err := json.Marshal(logEntry)
-	if err != nil {
-		_, _ = fmt.Fprintf(i.writer, "error marshaling log: %v; %+v", err, logEntry)
-		return
-	}
-
-	_, _ = fmt.Fprintln(i.writer, string(jsonLog))
+	_, _ = fmt.Fprintln(i.writer, *structs.UnsafeString(logEntry))
 }
 
 func (i *innerLogger) ctxLog(ctx context.Context) any {
@@ -156,7 +151,15 @@ func NewLogger(
 	app, scope, uid string,
 	logLevel LogLevelEnum,
 	expectedCtxFields []string, parserFn ...ParserFn) (*logger, error) {
-	parser := DefaultJSONParser
+
+	var parser ParserFn
+	switch env.EnvLogParser() {
+	case "text":
+		parser = DefaultTextParser
+	default:
+		parser = DefaultJSONParser
+	}
+
 	if len(parserFn) > 0 && parserFn[0] != nil {
 		parser = parserFn[0]
 	}
@@ -243,11 +246,5 @@ func (i *logger) log(level LogLevelEnum, call caller.Ptr, format string, args ..
 	}
 
 	logEntry := parser(level, i.App, i.Scope, msg, i.UID, nil, nil)
-	jsonLog, err := json.Marshal(logEntry)
-	if err != nil {
-		_, _ = fmt.Fprintf(i.writer, "error marshaling log: %v; %+v", err, logEntry)
-		return
-	}
-
-	_, _ = fmt.Fprintln(i.writer, string(jsonLog))
+	_, _ = fmt.Fprintln(i.writer, *structs.UnsafeString(logEntry))
 }
