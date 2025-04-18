@@ -43,5 +43,5 @@ func TestCallerSelf(t *testing.T) {
 	assert.Equal(t, Caller{"caller.TestCallerSelf", 0, nil}.String(), oneC)
 	assert.Equal(t, Caller{"caller.TestCallerSelf", 0, nil}.String(), twoC)
 	assert.Equal(t, Caller{"caller.a.noHop", 0, nil}.String(), noneC)
-	assert.Equal(t, Caller{"caller.a.lotHop.a.lotHop.func1.func2.1", 0, nil}.String(), lotC)
+	assert.Equal(t, Caller{"caller.a.lotHop.a.lotHop.func1.a.lotHop.a.lotHop.func1.func2.func3", 0, nil}.String(), lotC)
 }
