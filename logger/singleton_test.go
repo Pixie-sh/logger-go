@@ -397,3 +397,27 @@ func TestLoggerInitialization(t *testing.T) {
 		})
 	}
 }
+
+
+type wrapper struct {}
+
+func (w *wrapper) Error() string { return "wrapped error" }
+func (w *wrapper) Unwrap() error { return fmt.Errorf("inner wrapped error") }
+
+type wrapperNestedError struct {}
+
+func (w *wrapperNestedError) Error() string { return "wrapperNestedError" }
+func (w *wrapperNestedError) Unwrap() error { return &wrapper{} }
+
+type nilWrapperNestedError struct {}
+
+func (w *nilWrapperNestedError) Error() string { return "nilWrapperNestedError" }
+func (w *nilWrapperNestedError) Unwrap() error { return nil }
+
+func TestWrapped(t *testing.T) {
+	With("err", &wrapper{}).Error("test")
+	With("err", &wrapperNestedError{}).Error("test2")
+
+	With("err", nil).Error("test3")
+	With("err", &nilWrapperNestedError{}).Error("test4")
+}

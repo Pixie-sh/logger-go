@@ -240,44 +240,20 @@ var DefaultJSONParser = func(
 			} else {
 				switch v := v.(type) {
 				case error:
-					// Create a map to hold both struct values and error string
 					errorInfo := make(map[string]interface{})
+					errorInfo["error"] = v.Error()
 
-					// Always add the error string
-					errorInfo["error.string"] = v.Error()
-
-					// Try to unwrap the error
 					var innerErr interface{} = v
-					for {
-						u, ok := innerErr.(interface{ Unwrap() error })
-						if !ok {
-							break
-						}
-						innerErr = u.Unwrap()
-						if innerErr == nil {
-							break
-						}
-					}
-
-					// check if it's a fmt.Errorf type
-					if reflect.TypeOf(innerErr).String() != "*errors.errorString" {
-						// for other error types, try reflection
-						errorValue := reflect.ValueOf(innerErr)
-						if errorValue.Kind() == reflect.Ptr {
-							errorValue = errorValue.Elem()
-						}
-						if errorValue.Kind() == reflect.Struct {
-							for i := 0; i < errorValue.NumField(); i++ {
-								field := errorValue.Type().Field(i)
-								if field.IsExported() {
-									errorInfo[field.Name] = errorValue.Field(i).Interface()
-								}
-							}
+					u, ok := innerErr.(interface{ Unwrap() error })
+					if ok  && u != nil && u.Unwrap() != nil{
+						unwraped := u.Unwrap()
+						typeOfNil := reflect.TypeOf(unwraped)
+						if typeOfNil != nil {
+							errorInfo["error.unwrap"] = unwraped.Error()
 						}
 					}
 
 					logEntry[k] = errorInfo
-
 				default:
 					logEntry[k] = v
 				}
