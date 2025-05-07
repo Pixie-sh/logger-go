@@ -138,8 +138,7 @@ func formatValueForText(value interface{}) string {
 		return "base64(" + base64.StdEncoding.EncodeToString(v) + ")"
 
 	case error:
-		// Special handling for errors
-		return "ERROR: " + v.Error()
+		return fmt.Sprintf("error: %+v", v)
 
 	case time.Time:
 		// Format timestamps consistently
