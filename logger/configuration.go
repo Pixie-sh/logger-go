@@ -44,13 +44,27 @@ func newFromConfig(cfg Configuration, parser ParserFn) (Interface, error) {
 	if w == nil {
 		w = os.Stdout
 	}
+	// Defensive copy: appending TraceID directly onto cfg.ExpectedCtxFields
+	// would alias into the caller's backing array when it has spare capacity.
+	// Also dedupe so an explicit TraceID in config isn't walked twice.
+	fields := make([]string, 0, len(cfg.ExpectedCtxFields)+1)
+	seenTraceID := false
+	for _, f := range cfg.ExpectedCtxFields {
+		if f == TraceID {
+			seenTraceID = true
+		}
+		fields = append(fields, f)
+	}
+	if !seenTraceID {
+		fields = append(fields, TraceID)
+	}
 	return NewLogger(
 		w,
 		cfg.App,
 		cfg.Scope,
 		cfg.UID,
 		cfg.LogLevel,
-		append(cfg.ExpectedCtxFields, TraceID),
+		fields,
 		parser,
 	)
 }

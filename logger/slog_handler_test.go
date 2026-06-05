@@ -21,7 +21,7 @@ func TestSlogHandlerBasic(t *testing.T) {
 	var entry map[string]any
 	assert.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry))
 	assert.Equal(t, "hello", entry["message"])
-	assert.Equal(t, "INFO", entry["level"])
+	assert.Equal(t, "LOG", entry["level"])
 	assert.Equal(t, "alice", entry["user"])
 	assert.EqualValues(t, 7, entry["n"])
 }

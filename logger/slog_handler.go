@@ -3,6 +3,9 @@ package logger
 import (
 	"context"
 	"log/slog"
+	"time"
+
+	"github.com/pixie-sh/logger-go/caller"
 )
 
 // SlogHandler is an slog.Handler that delegates to an Interface so callers
@@ -12,7 +15,14 @@ import (
 //	sl := slog.New(h)
 //	sl.Info("hello", "user", "alice")
 //
-// Groups are flattened with a "." separator into the field key.
+// Behavior:
+//   - slog.LogValuer values are Resolve()'d before being attached, so types
+//     that implement redaction or lazy evaluation work as advertised.
+//   - slog.Group attributes are flattened into dot-separated keys
+//     ("http.status", etc.), matching the WithGroup convention.
+//   - r.PC and r.Time are honored when the underlying logger is one of this
+//     package's concrete types — the caller and timestamp reflect the
+//     original sl.Info(...) site rather than the handler's frame.
 type SlogHandler struct {
 	l     Interface
 	group string
@@ -25,17 +35,7 @@ func NewSlogHandler(l Interface) *SlogHandler {
 
 // Enabled reports whether the underlying logger would emit at the given level.
 func (h *SlogHandler) Enabled(_ context.Context, level slog.Level) bool {
-	myLevel := h.l.Level()
-	switch {
-	case level >= slog.LevelError:
-		return myLevel >= ERROR
-	case level >= slog.LevelWarn:
-		return myLevel >= WARN
-	case level >= slog.LevelInfo:
-		return myLevel >= LOG
-	default:
-		return myLevel >= DEBUG
-	}
+	return slogLevelEnabled(h.l.Level(), level)
 }
 
 // Handle converts an slog.Record into a call against the underlying logger.
@@ -45,16 +45,35 @@ func (h *SlogHandler) Handle(ctx context.Context, r slog.Record) error {
 		l = l.WithCtx(ctx)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		l = l.With(h.qualify(a.Key), a.Value.Any())
+		l = applyAttr(l, h.group, a)
 		return true
 	})
-	// Pass the message as a literal format string to skip fmt parsing.
-	switch {
-	case r.Level >= slog.LevelError:
+
+	level := slogToInternal(r.Level)
+
+	// When the underlying logger is one of our concrete types we have an
+	// internal path that takes the pre-resolved caller and timestamp.
+	// Otherwise fall back to the Interface method and accept the depth/time
+	// drift for that adapter.
+	if e, ok := l.(internalEmit); ok {
+		var c caller.Ptr
+		if r.PC != 0 {
+			c = caller.FromPC(r.PC)
+		}
+		t := r.Time
+		if t.IsZero() {
+			t = time.Now()
+		}
+		e.emitAt(level, c, t, "%s", r.Message)
+		return nil
+	}
+
+	switch level {
+	case ERROR:
 		l.Error("%s", r.Message)
-	case r.Level >= slog.LevelWarn:
+	case WARN:
 		l.Warn("%s", r.Message)
-	case r.Level >= slog.LevelInfo:
+	case LOG:
 		l.Info("%s", r.Message)
 	default:
 		l.Debug("%s", r.Message)
@@ -69,7 +88,7 @@ func (h *SlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	}
 	c := h.l.Clone()
 	for _, a := range attrs {
-		c = c.With(h.qualify(a.Key), a.Value.Any())
+		c = applyAttr(c, h.group, a)
 	}
 	return &SlogHandler{l: c, group: h.group}
 }
@@ -86,9 +105,63 @@ func (h *SlogHandler) WithGroup(name string) slog.Handler {
 	return &SlogHandler{l: h.l, group: g}
 }
 
-func (h *SlogHandler) qualify(key string) string {
-	if h.group == "" {
+func qualify(group, key string) string {
+	if group == "" {
 		return key
 	}
-	return h.group + "." + key
+	return group + "." + key
+}
+
+// applyAttr attaches one slog.Attr to the logger, resolving LogValuer
+// values and recursively flattening Group attrs into dotted keys.
+// Returns the (possibly new) logger to thread through chains.
+func applyAttr(l Interface, group string, a slog.Attr) Interface {
+	// slog spec: empty attrs are ignored.
+	if a.Equal(slog.Attr{}) {
+		return l
+	}
+	// Resolve LogValuer chains so redacting / lazy values see the right
+	// substitute before extraction.
+	v := a.Value.Resolve()
+
+	if v.Kind() == slog.KindGroup {
+		// Inline group attrs get flattened under the parent key (or, if
+		// the group name is empty, inlined at the current level).
+		childGroup := group
+		if a.Key != "" {
+			childGroup = qualify(group, a.Key)
+		}
+		for _, child := range v.Group() {
+			l = applyAttr(l, childGroup, child)
+		}
+		return l
+	}
+
+	return l.With(qualify(group, a.Key), v.Any())
+}
+
+func slogToInternal(level slog.Level) LogLevelEnum {
+	switch {
+	case level >= slog.LevelError:
+		return ERROR
+	case level >= slog.LevelWarn:
+		return WARN
+	case level >= slog.LevelInfo:
+		return LOG
+	default:
+		return DEBUG
+	}
+}
+
+func slogLevelEnabled(myLevel LogLevelEnum, level slog.Level) bool {
+	switch {
+	case level >= slog.LevelError:
+		return myLevel >= ERROR
+	case level >= slog.LevelWarn:
+		return myLevel >= WARN
+	case level >= slog.LevelInfo:
+		return myLevel >= LOG
+	default:
+		return myLevel >= DEBUG
+	}
 }

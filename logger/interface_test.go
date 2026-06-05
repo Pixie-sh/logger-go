@@ -15,7 +15,7 @@ func TestLevelMarshalText(t *testing.T) {
 		{FATAL, "FATAL"},
 		{ERROR, "ERROR"},
 		{WARN, "WARN"},
-		{LOG, "INFO"},
+		{LOG, "LOG"},
 		{DEBUG, "DEBUG"},
 	}
 	for _, c := range cases {
@@ -68,4 +68,10 @@ func TestLevelJSONRoundtrip(t *testing.T) {
 	var out2 cfg
 	assert.NoError(t, json.Unmarshal([]byte(`{"l":3}`), &out2))
 	assert.Equal(t, DEBUG, out2.L)
+
+	// null leaves zero value, no error (config UX: optional level field)
+	var out3 cfg
+	out3.L = WARN
+	assert.NoError(t, json.Unmarshal([]byte(`{"l":null}`), &out3))
+	assert.Equal(t, WARN, out3.L) // unchanged
 }

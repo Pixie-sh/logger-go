@@ -37,7 +37,7 @@ func (l LogLevelEnum) String() string {
 	case WARN:
 		return "WARN"
 	case LOG:
-		return "INFO"
+		return "LOG"
 	case DEBUG:
 		return "DEBUG"
 	default:
@@ -84,10 +84,14 @@ func (l LogLevelEnum) MarshalJSON() ([]byte, error) {
 	return json.Marshal(l.String())
 }
 
-// UnmarshalJSON accepts either the string name or the numeric value.
+// UnmarshalJSON accepts the string name, the numeric value, or null
+// (which leaves the field at its zero value).
 func (l *LogLevelEnum) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		return nil
+	}
 	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
+	if err := json.Unmarshal(b, &s); err == nil && s != "" {
 		v, perr := ParseLogLevel(s)
 		if perr != nil {
 			return perr

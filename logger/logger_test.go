@@ -146,7 +146,12 @@ func TestInnerJsonLogClone(t *testing.T) {
 	// Test 2: Ensure segment has the same initial values
 	segmentInner, ok := segment.(*innerLogger)
 	assert.True(t, ok, "Clone should return an *innerLogger")
-	assert.Equal(t, inner.logger, segmentInner.logger, "logger should be the same")
+	assert.NotSame(t, inner.logger, segmentInner.logger, "base logger should be independently cloned so SetLevel does not bleed")
+	assert.Equal(t, inner.logger.App, segmentInner.logger.App, "App should match")
+	assert.Equal(t, inner.logger.Scope, segmentInner.logger.Scope, "Scope should match")
+	assert.Equal(t, inner.logger.UID, segmentInner.logger.UID, "UID should match")
+	assert.Equal(t, inner.Level(), segmentInner.Level(), "level should be initially equal")
+	assert.Same(t, inner.logger.target, segmentInner.logger.target, "writer target is shared")
 	assert.Equal(t, inner.ctx, segmentInner.ctx, "Context should be the same")
 	assert.Equal(t, inner.fields, segmentInner.fields, "Fields should be initially the same")
 

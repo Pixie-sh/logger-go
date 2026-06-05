@@ -54,6 +54,15 @@ func NewCaller(depth Depth) Ptr {
 	if !ok {
 		return &Caller{}
 	}
+	return FromPC(pc)
+}
+
+// FromPC resolves a Caller from an already-known program counter (e.g. a
+// slog.Record.PC). The path string is memoized.
+func FromPC(pc uintptr) Ptr {
+	if pc == 0 {
+		return &Caller{}
+	}
 	if cached, hit := pathCache.Load(pc); hit {
 		return &Caller{Path: cached.(string), pc: pc}
 	}

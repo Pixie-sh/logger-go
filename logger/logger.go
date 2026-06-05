@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,6 +31,14 @@ type Entry struct {
 // Implementations must NOT retain references to e or its maps after returning.
 type ParserFn = func(e *Entry) []byte
 
+// internalEmit is a package-private extension implemented by the concrete
+// logger types. Callers that already know the correct caller frame and/or
+// record time (the slog handler, the singleton wrappers) use this to bypass
+// the level-method's own caller.Upper() resolution.
+type internalEmit interface {
+	emitAt(level LogLevelEnum, call caller.Ptr, t time.Time, format string, args ...any)
+}
+
 // writeTarget serialises concurrent writes from clones that share an io.Writer.
 // log.Logger does the same.
 type writeTarget struct {
@@ -37,10 +46,17 @@ type writeTarget struct {
 	w  io.Writer
 }
 
-func (wt *writeTarget) Write(b []byte) (int, error) {
+var newlineBytes = []byte{'\n'}
+
+// writeLine writes the payload followed by a newline. The two writes happen
+// under one lock so callers see a single atomic line, and we never need to
+// append('\n') into a slice that a custom ParserFn might be aliasing into a
+// pool-backed buffer.
+func (wt *writeTarget) writeLine(b []byte) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
-	return wt.w.Write(b)
+	_, _ = wt.w.Write(b)
+	_, _ = wt.w.Write(newlineBytes)
 }
 
 // logger is the base, fieldless logger.
@@ -106,9 +122,19 @@ func (i *logger) Info(f string, a ...any)     { i.emit(LOG, caller.Upper(), f, a
 func (i *logger) Error(f string, a ...any)    { i.emit(ERROR, caller.Upper(), f, a...) }
 func (i *logger) Warn(f string, a ...any)     { i.emit(WARN, caller.Upper(), f, a...) }
 func (i *logger) Debug(f string, a ...any)    { i.emit(DEBUG, caller.Upper(), f, a...) }
+
+// exitFn is the process-terminator used by Fatal. Defaults to os.Exit and is
+// overridable from tests so we can verify the defer-fires-on-panic behavior
+// without actually killing the test binary.
+var exitFn = os.Exit
+
+// Fatal logs at FATAL level and terminates the process. The os.Exit(1) runs
+// from a defer so that even if the parser or writer panics, the process is
+// still killed — a Fatal that turns into a swallowed goroutine crash would
+// be the most dangerous thing the library could do.
 func (i *logger) Fatal(f string, a ...any) {
+	defer exitFn(1)
 	i.emit(FATAL, caller.Upper(), f, a...)
-	os.Exit(1)
 }
 
 // With returns a new innerLogger carrying the given field.
@@ -133,6 +159,10 @@ func (i *logger) WithCtx(ctx context.Context) Interface {
 // Per-instance state (level) is copied; changing it on the clone does not
 // affect the original.
 func (i *logger) Clone() Interface {
+	return i.cloneBase()
+}
+
+func (i *logger) cloneBase() *logger {
 	c := &logger{
 		App:               i.App,
 		Scope:             i.Scope,
@@ -146,6 +176,10 @@ func (i *logger) Clone() Interface {
 }
 
 func (i *logger) emit(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
+	i.emitAt(level, call, time.Now(), format, args...)
+}
+
+func (i *logger) emitAt(level LogLevelEnum, call caller.Ptr, t time.Time, format string, args ...any) {
 	if i.Level() < level {
 		return
 	}
@@ -154,7 +188,7 @@ func (i *logger) emit(level LogLevelEnum, call caller.Ptr, format string, args .
 		msg = fmt.Sprintf(format, args...)
 	}
 	e := Entry{
-		Timestamp: time.Now(),
+		Timestamp: t,
 		Level:     level,
 		Caller:    call,
 		App:       i.App,
@@ -163,7 +197,7 @@ func (i *logger) emit(level LogLevelEnum, call caller.Ptr, format string, args .
 		Message:   msg,
 	}
 	blob := i.parser(&e)
-	_, _ = i.target.Write(append(blob, '\n'))
+	i.target.writeLine(blob)
 }
 
 // ---- innerLogger methods ----
@@ -185,7 +219,9 @@ func (i *innerLogger) WithCtx(ctx context.Context) Interface {
 	return i
 }
 
-// Clone returns an independent innerLogger with a deep-copied field map.
+// Clone returns an independent innerLogger. The base *logger is deep-copied
+// so that SetLevel (and any future mutable per-instance state) on the clone
+// does not affect the original.
 func (i *innerLogger) Clone() Interface {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -194,7 +230,7 @@ func (i *innerLogger) Clone() Interface {
 		newFields[k] = v
 	}
 	return &innerLogger{
-		logger: i.logger,
+		logger: i.logger.cloneBase(),
 		ctx:    i.ctx,
 		fields: newFields,
 	}
@@ -206,11 +242,15 @@ func (i *innerLogger) Error(f string, a ...any) { i.emit(ERROR, caller.Upper(), 
 func (i *innerLogger) Warn(f string, a ...any)  { i.emit(WARN, caller.Upper(), f, a...) }
 func (i *innerLogger) Debug(f string, a ...any) { i.emit(DEBUG, caller.Upper(), f, a...) }
 func (i *innerLogger) Fatal(f string, a ...any) {
+	defer exitFn(1)
 	i.emit(FATAL, caller.Upper(), f, a...)
-	os.Exit(1)
 }
 
 func (i *innerLogger) emit(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
+	i.emitAt(level, call, time.Now(), format, args...)
+}
+
+func (i *innerLogger) emitAt(level LogLevelEnum, call caller.Ptr, t time.Time, format string, args ...any) {
 	if i.Level() < level {
 		return
 	}
@@ -223,14 +263,17 @@ func (i *innerLogger) emit(level LogLevelEnum, call caller.Ptr, format string, a
 	ctxLog := i.ctxLog(i.ctx)
 	// Snapshot a stable view of the fields map for the parser. The lock is
 	// released before the write so a slow writer can't block With() callers.
-	fields := make(map[string]any, len(i.fields))
-	for k, v := range i.fields {
-		fields[k] = v
+	var fields map[string]any
+	if len(i.fields) > 0 {
+		fields = make(map[string]any, len(i.fields))
+		for k, v := range i.fields {
+			fields[k] = v
+		}
 	}
 	i.mu.RUnlock()
 
 	e := Entry{
-		Timestamp: time.Now(),
+		Timestamp: t,
 		Level:     level,
 		Caller:    call,
 		App:       i.App,
@@ -241,11 +284,14 @@ func (i *innerLogger) emit(level LogLevelEnum, call caller.Ptr, format string, a
 		Fields:    fields,
 	}
 	blob := i.parser(&e)
-	_, _ = i.target.Write(append(blob, '\n'))
+	i.target.writeLine(blob)
 }
 
+// ctxLog matches the pre-rewrite semantics: when ctx is non-nil the result
+// is always a (possibly empty) map, so downstream consumers see a stable
+// "ctx" key in every WithCtx-derived line.
 func (i *innerLogger) ctxLog(ctx context.Context) any {
-	if ctx == nil || len(i.expectedCtxFields) == 0 {
+	if ctx == nil {
 		return nil
 	}
 	ctxFields := map[string]any{}
@@ -254,8 +300,21 @@ func (i *innerLogger) ctxLog(ctx context.Context) any {
 			ctxFields[cf] = val
 		}
 	}
-	if len(ctxFields) == 0 {
-		return nil
-	}
 	return ctxFields
+}
+
+// isNilish returns true for both untyped nil and typed-nil interface values
+// (the classic `var e *MyErr; var i any = e; i == nil` // false footgun).
+// Used by must() and by the parsers' error-field handling to avoid panicking
+// on .Error()/.Unwrap() on a nil receiver.
+func isNilish(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		return rv.IsNil()
+	}
+	return false
 }
