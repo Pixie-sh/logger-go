@@ -17,9 +17,12 @@ type MockInterface struct {
 	withCtxCalled  bool
 	withCalled     bool
 	logCalled      bool
+	infoCalled     bool
 	errorCalled    bool
 	warnCalled     bool
 	debugCalled    bool
+	fatalCalled    bool
+	level          LogLevelEnum
 	lastCtx        context.Context
 	lastFieldName  string
 	lastFieldValue any
@@ -45,8 +48,17 @@ func (m *MockInterface) With(field string, value any) Interface {
 	return m
 }
 
+func (m *MockInterface) Level() LogLevelEnum     { return m.level }
+func (m *MockInterface) SetLevel(l LogLevelEnum) { m.level = l }
+
 func (m *MockInterface) Log(format string, args ...any) {
 	m.logCalled = true
+	m.lastFormat = format
+	m.lastArgs = args
+}
+
+func (m *MockInterface) Info(format string, args ...any) {
+	m.infoCalled = true
 	m.lastFormat = format
 	m.lastArgs = args
 }
@@ -65,6 +77,13 @@ func (m *MockInterface) Warn(format string, args ...any) {
 
 func (m *MockInterface) Debug(format string, args ...any) {
 	m.debugCalled = true
+	m.lastFormat = format
+	m.lastArgs = args
+}
+
+// Fatal mock does NOT call os.Exit so tests don't blow up.
+func (m *MockInterface) Fatal(format string, args ...any) {
+	m.fatalCalled = true
 	m.lastFormat = format
 	m.lastArgs = args
 }
@@ -316,7 +335,7 @@ func TestLoggerInitialization(t *testing.T) {
 		{"DEBUG level", "DEBUG", DEBUG},
 		{"WARN level", "WARN", WARN},
 		{"ERROR level", "ERROR", ERROR},
-		{"Default level", "", LOG},  // Empty should default to LOG
+		{"Default level", "", LOG},        // Empty should default to LOG
 		{"Unknown level", "UNKNOWN", LOG}, // Unknown should default to LOG
 	}
 
@@ -331,23 +350,11 @@ func TestLoggerInitialization(t *testing.T) {
 			// Create a new logger and capture its output
 			var buf bytes.Buffer
 			logger, err := NewLogger(
-				context.Background(),
 				&buf,
 				fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
 				env.EnvScope(),
 				fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
-				func() LogLevelEnum {
-					switch env.EnvLogLevel() {
-					case "DEBUG":
-						return DEBUG
-					case "WARN":
-						return WARN
-					case "ERROR":
-						return ERROR
-					default:
-						return LOG
-					}
-				}(),
+				levelFromEnv(),
 				[]string{TraceID})
 
 			if err != nil {
@@ -398,18 +405,17 @@ func TestLoggerInitialization(t *testing.T) {
 	}
 }
 
-
-type wrapper struct {}
+type wrapper struct{}
 
 func (w *wrapper) Error() string { return "wrapped error" }
 func (w *wrapper) Unwrap() error { return fmt.Errorf("inner wrapped error") }
 
-type wrapperNestedError struct {}
+type wrapperNestedError struct{}
 
 func (w *wrapperNestedError) Error() string { return "wrapperNestedError" }
 func (w *wrapperNestedError) Unwrap() error { return &wrapper{} }
 
-type nilWrapperNestedError struct {}
+type nilWrapperNestedError struct{}
 
 func (w *nilWrapperNestedError) Error() string { return "nilWrapperNestedError" }
 func (w *nilWrapperNestedError) Unwrap() error { return nil }

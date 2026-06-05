@@ -3,248 +3,259 @@ package logger
 import (
 	"context"
 	"fmt"
-	"github.com/pixie-sh/logger-go/env"
-	"github.com/pixie-sh/logger-go/structs"
 	"io"
+	"os"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pixie-sh/logger-go/caller"
+	"github.com/pixie-sh/logger-go/env"
 )
 
-type ParserFn = func(
-	level LogLevelEnum,
-	app string,
-	scope string,
-	expandedMsg string,
-	logUID string,
-	ctxLog any,
-	fields map[string]any,
-) []byte
+// Entry is the value passed to ParserFn for each emitted log line.
+type Entry struct {
+	Timestamp time.Time
+	Level     LogLevelEnum
+	Caller    caller.Ptr
+	App       string
+	Scope     string
+	UID       string
+	Message   string
+	Ctx       any
+	Fields    map[string]any
+}
 
-// logger represents a logger that outputs JSON logs.
+// ParserFn turns an Entry into the bytes that get written to the writer.
+// Implementations must NOT retain references to e or its maps after returning.
+type ParserFn = func(e *Entry) []byte
+
+// writeTarget serialises concurrent writes from clones that share an io.Writer.
+// log.Logger does the same.
+type writeTarget struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (wt *writeTarget) Write(b []byte) (int, error) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	return wt.w.Write(b)
+}
+
+// logger is the base, fieldless logger.
 type logger struct {
-	App      string
-	Scope    string
-	UID      string
-	LogLevel LogLevelEnum
+	App   string
+	Scope string
+	UID   string
 
-	writer            io.Writer
+	level             atomic.Int32
+	target            *writeTarget
 	expectedCtxFields []string
 	parser            ParserFn
 }
 
-// innerLogger represents a logger with additional fields.
+// innerLogger wraps logger with attached fields + context. Intended for
+// goroutine-local use after Clone()/With()/WithCtx().
 type innerLogger struct {
 	*logger
 
-	mu                sync.RWMutex
-	Ctx               context.Context
-	expectedCtxFields []string
-
+	mu     sync.RWMutex
+	ctx    context.Context
 	fields map[string]any
-	parser ParserFn
-}
-
-func (i *innerLogger) With(field string, value any) Interface {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-
-	i.fields[field] = value
-	return i
-}
-
-// WithCtx adds ctx to fields
-func (i *innerLogger) WithCtx(ctx context.Context) Interface {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-
-	i.Ctx = ctx
-	return i
-}
-
-func (i *innerLogger) Clone() Interface {
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-
-	// Create a new map and copy all fields
-	newFields := make(map[string]any, len(i.fields))
-	for k, v := range i.fields {
-		newFields[k] = v
-	}
-
-	// Create a new innerLogger with copied fields
-	return &innerLogger{
-		logger:            i.logger,
-		Ctx:               i.Ctx,
-		fields:            newFields,
-		parser:            i.parser,
-		expectedCtxFields: i.expectedCtxFields,
-	}
-}
-
-// Log logs a message at LOG level.
-func (i *innerLogger) Log(format string, args ...any) {
-	i.With("caller", caller.Upper())
-	i.log(LOG, format, args...)
-}
-
-// Error logs a message at ERROR level.
-func (i *innerLogger) Error(format string, args ...any) {
-	i.With("caller", caller.Upper())
-	i.log(ERROR, format, args...)
-}
-
-// Warn logs a message at WARN level.
-func (i *innerLogger) Warn(format string, args ...any) {
-	i.With("caller", caller.Upper())
-	i.log(WARN, format, args...)
-}
-
-// Debug logs a message at DEBUG level.
-func (i *innerLogger) Debug(format string, args ...any) {
-	i.With("caller", caller.Upper())
-	i.log(DEBUG, format, args...)
-}
-
-// log is an internal method to log messages with structured logging.
-func (i *innerLogger) log(level LogLevelEnum, format string, args ...any) {
-	if i.LogLevel < level {
-		return
-	}
-
-	var msg = format
-	if len(args) > 0 {
-		msg = fmt.Sprintf(format, args...)
-	}
-
-	var parser = DefaultJSONParser
-	if i.parser != nil {
-		parser = i.parser
-	}
-
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	logEntry := parser(level, i.App, i.Scope, msg, i.UID, i.ctxLog(i.Ctx), i.fields)
-	_, _ = fmt.Fprintln(i.writer, *structs.UnsafeString(logEntry))
-}
-
-func (i *innerLogger) ctxLog(ctx context.Context) any {
-	if ctx == nil {
-		return nil
-	}
-
-	ctxFields := map[string]any{}
-	for _, cf := range i.expectedCtxFields {
-		val := ctx.Value(cf)
-		if val != nil {
-			ctxFields[cf] = val
-		}
-	}
-
-	return ctxFields
 }
 
 // NewLogger creates a new logger with default values.
 func NewLogger(
-	_ context.Context,
 	writer io.Writer,
 	app, scope, uid string,
 	logLevel LogLevelEnum,
-	expectedCtxFields []string, parserFn ...ParserFn) (*logger, error) {
-
-	var parser ParserFn
-	switch env.EnvLogParser() {
-	case "text":
-		parser = DefaultTextParser
-	default:
-		parser = DefaultJSONParser
+	expectedCtxFields []string,
+	parserFn ...ParserFn,
+) (*logger, error) {
+	if writer == nil {
+		writer = os.Stdout
 	}
 
+	parser := DefaultJSONParser
+	if env.EnvLogParser() == "text" {
+		parser = DefaultTextParser
+	}
 	if len(parserFn) > 0 && parserFn[0] != nil {
 		parser = parserFn[0]
 	}
 
-	return &logger{
+	l := &logger{
 		App:               app,
 		Scope:             scope,
 		UID:               uid,
-		LogLevel:          logLevel,
-		writer:            writer,
-		parser:            parser,
+		target:            &writeTarget{w: writer},
 		expectedCtxFields: expectedCtxFields,
-	}, nil
+		parser:            parser,
+	}
+	l.level.Store(int32(logLevel))
+	return l, nil
 }
 
-// With adds a field to the logger.
+// ---- logger (base) methods ----
+
+func (i *logger) Level() LogLevelEnum         { return LogLevelEnum(i.level.Load()) }
+func (i *logger) SetLevel(l LogLevelEnum)     { i.level.Store(int32(l)) }
+func (i *logger) Log(format string, a ...any) { i.emit(LOG, caller.Upper(), format, a...) }
+func (i *logger) Info(f string, a ...any)     { i.emit(LOG, caller.Upper(), f, a...) }
+func (i *logger) Error(f string, a ...any)    { i.emit(ERROR, caller.Upper(), f, a...) }
+func (i *logger) Warn(f string, a ...any)     { i.emit(WARN, caller.Upper(), f, a...) }
+func (i *logger) Debug(f string, a ...any)    { i.emit(DEBUG, caller.Upper(), f, a...) }
+func (i *logger) Fatal(f string, a ...any) {
+	i.emit(FATAL, caller.Upper(), f, a...)
+	os.Exit(1)
+}
+
+// With returns a new innerLogger carrying the given field.
 func (i *logger) With(field string, value any) Interface {
 	return &innerLogger{
-		logger:            i,
-		Ctx:               context.Background(),
-		expectedCtxFields: i.expectedCtxFields,
-		parser:            i.parser,
-		fields:            map[string]any{field: value},
+		logger: i,
+		ctx:    context.Background(),
+		fields: map[string]any{field: value},
 	}
 }
 
-// WithCtx adds ctx to fields
+// WithCtx returns a new innerLogger bound to the given ctx.
 func (i *logger) WithCtx(ctx context.Context) Interface {
 	return &innerLogger{
-		logger:            i,
-		Ctx:               ctx,
-		expectedCtxFields: i.expectedCtxFields,
-		parser:            i.parser,
-		fields:            map[string]any{},
+		logger: i,
+		ctx:    ctx,
+		fields: map[string]any{},
 	}
 }
 
+// Clone returns an independent base logger that shares the underlying writer.
+// Per-instance state (level) is copied; changing it on the clone does not
+// affect the original.
 func (i *logger) Clone() Interface {
-	return &logger{
+	c := &logger{
 		App:               i.App,
 		Scope:             i.Scope,
 		UID:               i.UID,
-		LogLevel:          i.LogLevel,
-		writer:            i.writer,
+		target:            i.target,
 		expectedCtxFields: i.expectedCtxFields,
 		parser:            i.parser,
 	}
+	c.level.Store(i.level.Load())
+	return c
 }
 
-// Log logs a message at LOG level.
-func (i *logger) Log(format string, args ...any) {
-	i.log(LOG, caller.Upper(), format, args...)
-}
-
-// Error logs a message at ERROR level.
-func (i *logger) Error(format string, args ...any) {
-	i.log(ERROR, caller.Upper(), format, args...)
-}
-
-// Warn logs a message at WARN level.
-func (i *logger) Warn(format string, args ...any) {
-	i.log(WARN, caller.Upper(), format, args...)
-}
-
-// Debug logs a message at DEBUG level.
-func (i *logger) Debug(format string, args ...any) {
-	i.log(DEBUG, caller.Upper(), format, args...)
-}
-
-// log is an internal method to log messages with structured logging.
-func (i *logger) log(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
-	if i.LogLevel < level {
+func (i *logger) emit(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
+	if i.Level() < level {
 		return
 	}
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
+	}
+	e := Entry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Caller:    call,
+		App:       i.App,
+		Scope:     i.Scope,
+		UID:       i.UID,
+		Message:   msg,
+	}
+	blob := i.parser(&e)
+	_, _ = i.target.Write(append(blob, '\n'))
+}
 
-	var msg = format
+// ---- innerLogger methods ----
+
+// With adds (or overwrites) a field on this innerLogger and returns self.
+// Intended for goroutine-local chains after Clone()/With()/WithCtx().
+func (i *innerLogger) With(field string, value any) Interface {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.fields[field] = value
+	return i
+}
+
+// WithCtx swaps the bound context and returns self.
+func (i *innerLogger) WithCtx(ctx context.Context) Interface {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.ctx = ctx
+	return i
+}
+
+// Clone returns an independent innerLogger with a deep-copied field map.
+func (i *innerLogger) Clone() Interface {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	newFields := make(map[string]any, len(i.fields))
+	for k, v := range i.fields {
+		newFields[k] = v
+	}
+	return &innerLogger{
+		logger: i.logger,
+		ctx:    i.ctx,
+		fields: newFields,
+	}
+}
+
+func (i *innerLogger) Log(f string, a ...any)   { i.emit(LOG, caller.Upper(), f, a...) }
+func (i *innerLogger) Info(f string, a ...any)  { i.emit(LOG, caller.Upper(), f, a...) }
+func (i *innerLogger) Error(f string, a ...any) { i.emit(ERROR, caller.Upper(), f, a...) }
+func (i *innerLogger) Warn(f string, a ...any)  { i.emit(WARN, caller.Upper(), f, a...) }
+func (i *innerLogger) Debug(f string, a ...any) { i.emit(DEBUG, caller.Upper(), f, a...) }
+func (i *innerLogger) Fatal(f string, a ...any) {
+	i.emit(FATAL, caller.Upper(), f, a...)
+	os.Exit(1)
+}
+
+func (i *innerLogger) emit(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
+	if i.Level() < level {
+		return
+	}
+	msg := format
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
 
-	var parser = DefaultJSONParser
-	if i.parser != nil {
-		parser = i.parser
+	i.mu.RLock()
+	ctxLog := i.ctxLog(i.ctx)
+	// Snapshot a stable view of the fields map for the parser. The lock is
+	// released before the write so a slow writer can't block With() callers.
+	fields := make(map[string]any, len(i.fields))
+	for k, v := range i.fields {
+		fields[k] = v
 	}
+	i.mu.RUnlock()
 
-	logEntry := parser(level, i.App, i.Scope, msg, i.UID, nil, nil)
-	_, _ = fmt.Fprintln(i.writer, *structs.UnsafeString(logEntry))
+	e := Entry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Caller:    call,
+		App:       i.App,
+		Scope:     i.Scope,
+		UID:       i.UID,
+		Message:   msg,
+		Ctx:       ctxLog,
+		Fields:    fields,
+	}
+	blob := i.parser(&e)
+	_, _ = i.target.Write(append(blob, '\n'))
+}
+
+func (i *innerLogger) ctxLog(ctx context.Context) any {
+	if ctx == nil || len(i.expectedCtxFields) == 0 {
+		return nil
+	}
+	ctxFields := map[string]any{}
+	for _, cf := range i.expectedCtxFields {
+		if val := ctx.Value(cf); val != nil {
+			ctxFields[cf] = val
+		}
+	}
+	if len(ctxFields) == 0 {
+		return nil
+	}
+	return ctxFields
 }

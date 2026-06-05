@@ -20,7 +20,7 @@ type container struct {
 type errorStruct struct {
 	Msg      string `json:"msg"`
 	Field    string `json:"field"`
-	pvtField string `json:"pvtfield"`
+	pvtField string
 }
 
 func (receiver errorStruct) Error() string {
@@ -28,7 +28,7 @@ func (receiver errorStruct) Error() string {
 }
 
 func TestLogger(t *testing.T) {
-	logger, _ := NewLogger(context.Background(), os.Stdout, "MyApp", "MainScope", "", DEBUG, []string{TraceID})
+	logger, _ := NewLogger(os.Stdout, "MyApp", "MainScope", "", DEBUG, []string{TraceID})
 	logger.Log("This is a log message")
 
 	fmt.Println("-------------")
@@ -46,7 +46,7 @@ func TestLogger(t *testing.T) {
 
 func TestSharedInnerJsonLogConcurrency(t *testing.T) {
 	var buf bytes.Buffer
-	baseLogger, err := NewLogger(context.Background(), &buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
+	baseLogger, err := NewLogger(&buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
@@ -128,14 +128,13 @@ func TestInnerJsonLogClone(t *testing.T) {
 	buf := new(bytes.Buffer)
 
 	// Create a base logger
-	baseLogger, _ := NewLogger(context.Background(), buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
+	baseLogger, _ := NewLogger(buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
 
 	// Create an innerLogger
 	inner := &innerLogger{
-		logger:            baseLogger,
-		Ctx:               context.WithValue(context.Background(), "requestID", "12345"),
-		fields:            map[string]any{"field1": "value1"},
-		expectedCtxFields: []string{"requestID"},
+		logger: baseLogger,
+		ctx:    context.WithValue(context.Background(), "requestID", "12345"),
+		fields: map[string]any{"field1": "value1"},
 	}
 
 	// Create a segment
@@ -148,8 +147,7 @@ func TestInnerJsonLogClone(t *testing.T) {
 	segmentInner, ok := segment.(*innerLogger)
 	assert.True(t, ok, "Clone should return an *innerLogger")
 	assert.Equal(t, inner.logger, segmentInner.logger, "logger should be the same")
-	assert.Equal(t, inner.Ctx, segmentInner.Ctx, "Context should be the same")
-	assert.Equal(t, inner.expectedCtxFields, segmentInner.expectedCtxFields, "Expected context fields should be the same")
+	assert.Equal(t, inner.ctx, segmentInner.ctx, "Context should be the same")
 	assert.Equal(t, inner.fields, segmentInner.fields, "Fields should be initially the same")
 
 	// Test 3: Ensure modifications to segment don't affect original
@@ -179,7 +177,7 @@ func TestJsonLoggerClone(t *testing.T) {
 	buf := new(bytes.Buffer)
 
 	// Create a base logger
-	baseLogger, _ := NewLogger(context.Background(), buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
+	baseLogger, _ := NewLogger(buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID"})
 
 	// Create a segment
 	segment := baseLogger.Clone()
@@ -193,8 +191,8 @@ func TestJsonLoggerClone(t *testing.T) {
 	assert.Equal(t, baseLogger.App, segmentLogger.App, "App should be the same")
 	assert.Equal(t, baseLogger.Scope, segmentLogger.Scope, "Scope should be the same")
 	assert.Equal(t, baseLogger.UID, segmentLogger.UID, "UID should be the same")
-	assert.Equal(t, baseLogger.LogLevel, segmentLogger.LogLevel, "LogLevel should be the same")
-	assert.Equal(t, baseLogger.writer, segmentLogger.writer, "Writer should be the same")
+	assert.Equal(t, baseLogger.Level(), segmentLogger.Level(), "LogLevel should be the same")
+	assert.Same(t, baseLogger.target, segmentLogger.target, "Writer target should be shared")
 	assert.Equal(t, baseLogger.expectedCtxFields, segmentLogger.expectedCtxFields, "Expected context fields should be the same")
 
 	// Test 3: Ensure modifications to segment don't affect original
@@ -219,7 +217,7 @@ func TestSegmentWithAndWithCtx(t *testing.T) {
 	buf := new(bytes.Buffer)
 
 	// Create a base logger
-	baseLogger, _ := NewLogger(context.Background(), buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID", "userID"})
+	baseLogger, _ := NewLogger(buf, "TestApp", "TestScope", "TestUID", DEBUG, []string{"requestID", "userID"})
 
 	// Create an initial context
 	initialCtx := context.WithValue(context.Background(), "requestID", "initial-request-id")

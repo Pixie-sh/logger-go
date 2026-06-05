@@ -1,0 +1,27 @@
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - misspell
+
+linters-settings:
+  staticcheck:
+    checks:
+      - "all"
+      # SA1029: use of string as context.Value key. This package supports
+      # callers that store values with string keys for backward compat.
+      - "-SA1029"
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck

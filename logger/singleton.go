@@ -3,13 +3,13 @@ package logger
 import (
 	"context"
 	"fmt"
-	"github.com/pixie-sh/logger-go/env"
-	"github.com/pixie-sh/logger-go/mapper"
 	"os"
+
+	"github.com/pixie-sh/logger-go/env"
 )
 
-// Logger global instance to be used everywhere,
-// until a specific instance is assigned
+// Logger is the global instance used by the package-level helpers.
+// It may be reassigned by callers that need to inject a custom logger.
 var Logger Interface
 
 func init() {
@@ -18,65 +18,53 @@ func init() {
 		scope = "-"
 	}
 
-	Logger, _ = NewLogger(
-		context.Background(),
+	appVersion := fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion())
+
+	l, err := NewLogger(
 		os.Stdout,
-		fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
+		appVersion,
 		scope,
-		fmt.Sprintf("%s-%s", env.EnvAppName(), env.EnvAppVersion()),
-		func() LogLevelEnum {
-			switch env.EnvLogLevel() {
-			case "DEBUG":
-				return DEBUG
-			case "WARN":
-				return WARN
-			case "ERROR":
-				return ERROR
-			default:
-				return LOG
-			}
-		}(),
+		appVersion,
+		levelFromEnv(),
 		[]string{TraceID},
 	)
+	if err != nil {
+		// NewLogger cannot currently fail; panic if that ever changes so
+		// the misconfiguration is surfaced loudly.
+		panic(fmt.Errorf("logger init failed: %w", err))
+	}
+	Logger = l
 }
 
-func Clone() Interface {
-	must(Logger)
-	return Logger.Clone()
-}
-
-func must(l Interface) {
-	if mapper.Nil(l) {
-		panic(fmt.Errorf("logger is not initialized, please call NewLogger() first"))
+func levelFromEnv() LogLevelEnum {
+	switch env.EnvLogLevel() {
+	case "DEBUG":
+		return DEBUG
+	case "WARN":
+		return WARN
+	case "ERROR":
+		return ERROR
+	case "FATAL":
+		return FATAL
+	default:
+		return LOG
 	}
 }
 
-func WithCtx(ctx context.Context) Interface {
-	must(Logger)
-	return Logger.WithCtx(ctx)
+func must() {
+	if Logger == nil {
+		panic(fmt.Errorf("logger is not initialized, please assign logger.Logger before use"))
+	}
 }
 
-func With(field string, value any) Interface {
-	must(Logger)
-	return Logger.With(field, value)
-}
-
-func Log(format string, args ...any) {
-	must(Logger)
-	Logger.Log(format, args...)
-}
-
-func Error(format string, args ...any) {
-	must(Logger)
-	Logger.Error(format, args...)
-}
-
-func Warn(format string, args ...any) {
-	must(Logger)
-	Logger.Warn(format, args...)
-}
-
-func Debug(format string, args ...any) {
-	must(Logger)
-	Logger.Debug(format, args...)
-}
+func Clone() Interface                       { must(); return Logger.Clone() }
+func WithCtx(ctx context.Context) Interface  { must(); return Logger.WithCtx(ctx) }
+func With(field string, value any) Interface { must(); return Logger.With(field, value) }
+func Level() LogLevelEnum                    { must(); return Logger.Level() }
+func SetLevel(l LogLevelEnum)                { must(); Logger.SetLevel(l) }
+func Log(format string, args ...any)         { must(); Logger.Log(format, args...) }
+func Info(format string, args ...any)        { must(); Logger.Info(format, args...) }
+func Error(format string, args ...any)       { must(); Logger.Error(format, args...) }
+func Warn(format string, args ...any)        { must(); Logger.Warn(format, args...) }
+func Debug(format string, args ...any)       { must(); Logger.Debug(format, args...) }
+func Fatal(format string, args ...any)       { must(); Logger.Fatal(format, args...) }

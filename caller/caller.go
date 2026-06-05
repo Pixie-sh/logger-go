@@ -4,6 +4,7 @@ import (
 	"path"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // Depth caller depth type
@@ -23,9 +24,9 @@ type Ptr = *Caller
 
 // Caller holds the caller info. mostly used for metrics
 type Caller struct {
-	Path    string        `json:"Path,omitempty"`
-	pc      uintptr       `json:"pc,omitempty"`
-	details *runtime.Func `json:"details,omitempty"`
+	Path    string  `json:"Path,omitempty"`
+	pc      uintptr `json:"-"`
+	details *runtime.Func
 }
 
 // String return caller Path
@@ -43,30 +44,33 @@ func Upper() Ptr {
 	return NewCaller(TwoHopsCallerDepth)
 }
 
+// pathCache memoizes the sanitized function path keyed by program counter.
+// Hot path: caller.Upper() is invoked on every log line.
+var pathCache sync.Map // map[uintptr]string
+
 // NewCaller returns a caller based on depth
 func NewCaller(depth Depth) Ptr {
-	caller := Caller{}
 	pc, _, _, ok := runtime.Caller(depth)
-	details := runtime.FuncForPC(pc)
-	if ok && details != nil {
-		caller.Path = sanitizeCallerPath(path.Base(details.Name()))
-		caller.pc = pc
-		caller.details = details
+	if !ok {
+		return &Caller{}
 	}
-
-	return &caller
+	if cached, hit := pathCache.Load(pc); hit {
+		return &Caller{Path: cached.(string), pc: pc}
+	}
+	details := runtime.FuncForPC(pc)
+	if details == nil {
+		return &Caller{pc: pc}
+	}
+	p := sanitizeCallerPath(path.Base(details.Name()))
+	pathCache.Store(pc, p)
+	return &Caller{Path: p, pc: pc, details: details}
 }
 
-func sanitizeCallerPath(path string) string {
-	rawParts := strings.Split(path, ".")
+func sanitizeCallerPath(p string) string {
+	rawParts := strings.Split(p, ".")
 	parts := make([]string, 0, len(rawParts))
 	for _, part := range rawParts {
-		trimmed := strings.Trim(
-			part,
-			"()*",
-		)
-		parts = append(parts, trimmed)
+		parts = append(parts, strings.Trim(part, "()*"))
 	}
-
 	return strings.Join(parts, ".")
 }
