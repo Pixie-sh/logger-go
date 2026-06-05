@@ -11,7 +11,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.23', '1.24']
+        # go.mod requires 1.26; test against the floor and on stable to
+        # surface forward-compat regressions as new releases land.
+        go: ['1.26', 'stable']
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +41,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           check-latest: true
 
       - name: Run benchmarks
@@ -52,10 +54,14 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
           check-latest: true
 
-      - uses: golangci/golangci-lint-action@v6
+      # v7 of the action pulls golangci-lint v2.x, which is built with a
+      # Go toolchain new enough to lint go.mod's 1.26 floor. Older v6+v1
+      # combos error with "language version used to build golangci-lint is
+      # lower than the targeted Go version".
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: latest
           args: --timeout=5m

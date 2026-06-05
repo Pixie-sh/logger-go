@@ -1,27 +1,30 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
     - misspell
+  settings:
+    staticcheck:
+      checks:
+        - all
+        # SA1029: use of plain string as context.Value key. This package
+        # accepts string ctx keys for backward compatibility.
+        - "-SA1029"
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
 
-linters-settings:
-  staticcheck:
-    checks:
-      - "all"
-      # SA1029: use of string as context.Value key. This package supports
-      # callers that store values with string keys for backward compat.
-      - "-SA1029"
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+formatters:
+  enable:
+    - gofmt
