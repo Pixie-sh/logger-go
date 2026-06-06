@@ -212,7 +212,7 @@ func formatValueForText(value any, depth int) string {
 
 	val := reflect.ValueOf(value)
 
-	if val.Kind() == reflect.Ptr && !val.IsNil() {
+	if val.Kind() == reflect.Pointer && !val.IsNil() {
 		return formatValueForText(val.Elem().Interface(), depth+1)
 	}
 
