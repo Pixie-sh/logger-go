@@ -1,3 +1,5 @@
+// Package logger provides a structured logger with pluggable parsers,
+// context-bound fields, and concurrency-safe cloning.
 package logger
 
 import (

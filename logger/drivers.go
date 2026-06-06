@@ -148,7 +148,7 @@ func flattenAndAppendFields(key string, value any, logLine *string, prefix strin
 
 	v := reflect.ValueOf(value)
 
-	if v.Kind() == reflect.Ptr && !v.IsNil() {
+	if v.Kind() == reflect.Pointer && !v.IsNil() {
 		v = v.Elem()
 	}
 
@@ -164,7 +164,7 @@ func flattenAndAppendFields(key string, value any, logLine *string, prefix strin
 
 			fv := reflect.ValueOf(fieldValue)
 			if fv.Kind() == reflect.Struct ||
-				(fv.Kind() == reflect.Ptr && !fv.IsNil()) {
+				(fv.Kind() == reflect.Pointer && !fv.IsNil()) {
 				flattenAndAppendFields(key+"."+field.Name, fieldValue, logLine, prefix, depth+1)
 			} else {
 				*logLine += fmt.Sprintf("\n  %s: %s", fieldKey, formatValueForText(fieldValue, depth+1))
@@ -178,7 +178,7 @@ func flattenAndAppendFields(key string, value any, logLine *string, prefix strin
 			mv := reflect.ValueOf(mapValue)
 			if mv.Kind() == reflect.Struct ||
 				mv.Kind() == reflect.Map ||
-				(mv.Kind() == reflect.Ptr && !mv.IsNil()) {
+				(mv.Kind() == reflect.Pointer && !mv.IsNil()) {
 				flattenAndAppendFields(key+"."+k.String(), mapValue, logLine, prefix, depth+1)
 			} else {
 				*logLine += fmt.Sprintf("\n  %s: %s", mapKey, formatValueForText(mapValue, depth+1))

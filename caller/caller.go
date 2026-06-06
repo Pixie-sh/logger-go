@@ -1,3 +1,4 @@
+// Package caller resolves runtime call sites for log records.
 package caller
 
 import (
