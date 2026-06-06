@@ -1,3 +1,5 @@
+// Package env provides small helpers for reading and normalizing
+// environment-variable inputs used by the logger.
 package env
 
 import (

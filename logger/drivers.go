@@ -108,7 +108,7 @@ func DefaultTextParser(e *Entry) []byte {
 				continue
 			}
 			switch reflect.ValueOf(v).Kind() {
-			case reflect.Struct, reflect.Map, reflect.Ptr:
+			case reflect.Struct, reflect.Map, reflect.Pointer:
 				flattenAndAppendFields(k, v, &logLine, "Fields", 0)
 			default:
 				logLine += fmt.Sprintf("\n  Fields.%s: %s", k, formatValueForText(v, 0))
@@ -226,7 +226,7 @@ func formatValueForText(value any, depth int) string {
 		for iter.Next() {
 			k := iter.Key().Interface()
 			v := iter.Value().Interface()
-			builder.WriteString(fmt.Sprintf("      %v: %s\n", k, formatValueForText(v, depth+1)))
+			fmt.Fprintf(&builder, "      %v: %s\n", k, formatValueForText(v, depth+1))
 		}
 		builder.WriteString("    }")
 		return builder.String()
@@ -239,7 +239,7 @@ func formatValueForText(value any, depth int) string {
 		var builder strings.Builder
 		builder.WriteString("[\n")
 		for i := 0; i < val.Len(); i++ {
-			builder.WriteString(fmt.Sprintf("      %s\n", formatValueForText(val.Index(i).Interface(), depth+1)))
+			fmt.Fprintf(&builder, "      %s\n", formatValueForText(val.Index(i).Interface(), depth+1))
 		}
 		builder.WriteString("    ]")
 		return builder.String()
@@ -251,9 +251,9 @@ func formatValueForText(value any, depth int) string {
 		t := val.Type()
 		for i := 0; i < val.NumField(); i++ {
 			if t.Field(i).IsExported() {
-				builder.WriteString(fmt.Sprintf("      %s: %s\n",
+				fmt.Fprintf(&builder, "      %s: %s\n",
 					t.Field(i).Name,
-					formatValueForText(val.Field(i).Interface(), depth+1)))
+					formatValueForText(val.Field(i).Interface(), depth+1))
 			}
 		}
 		builder.WriteString("    }")

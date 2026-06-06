@@ -1,3 +1,6 @@
+// Package structs provides pointer-wrapper aliases and conversion
+// helpers for primitive types, used to avoid unintended Gorm updates
+// when zero-values must be distinguished from "not set".
 package structs
 
 import "unsafe"

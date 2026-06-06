@@ -230,7 +230,7 @@ func (i *innerLogger) Clone() Interface {
 		newFields[k] = v
 	}
 	return &innerLogger{
-		logger: i.logger.cloneBase(),
+		logger: i.cloneBase(),
 		ctx:    i.ctx,
 		fields: newFields,
 	}
