@@ -116,6 +116,7 @@ type Interface interface {
 	Level() LogLevelEnum
 	SetLevel(LogLevelEnum)
 
+	// Deprecated: use Info.
 	Log(format string, args ...any)
 	Info(format string, args ...any)
 	Error(format string, args ...any)

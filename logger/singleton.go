@@ -98,11 +98,16 @@ func SetLevel(l LogLevelEnum)                { must(); getLogger().SetLevel(l) }
 // wrapper. We pass the resolved caller and the active logger into a small
 // dispatcher.
 
-func Log(format string, args ...any)   { dispatch(LOG, caller.Upper(), format, args) }
-func Info(format string, args ...any)  { dispatch(LOG, caller.Upper(), format, args) }
+// Deprecated: use Info.
+func Log(format string, args ...any)   { info(caller.Upper(), format, args) }
+func Info(format string, args ...any)  { info(caller.Upper(), format, args) }
 func Error(format string, args ...any) { dispatch(ERROR, caller.Upper(), format, args) }
 func Warn(format string, args ...any)  { dispatch(WARN, caller.Upper(), format, args) }
 func Debug(format string, args ...any) { dispatch(DEBUG, caller.Upper(), format, args) }
+
+func info(c caller.Ptr, format string, args []any) {
+	dispatch(LOG, c, format, args)
+}
 
 func Fatal(format string, args ...any) {
 	c := caller.Upper()
@@ -133,6 +138,6 @@ func dispatch(level LogLevelEnum, c caller.Ptr, format string, args []any) {
 	case DEBUG:
 		l.Debug(format, args...)
 	default:
-		l.Log(format, args...)
+		l.Info(format, args...)
 	}
 }

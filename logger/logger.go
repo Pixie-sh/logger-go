@@ -117,13 +117,19 @@ func NewLogger(
 
 // ---- logger (base) methods ----
 
-func (i *logger) Level() LogLevelEnum         { return LogLevelEnum(i.level.Load()) }
-func (i *logger) SetLevel(l LogLevelEnum)     { i.level.Store(int32(l)) }
-func (i *logger) Log(format string, a ...any) { i.emit(LOG, caller.Upper(), format, a...) }
-func (i *logger) Info(f string, a ...any)     { i.emit(LOG, caller.Upper(), f, a...) }
+func (i *logger) Level() LogLevelEnum     { return LogLevelEnum(i.level.Load()) }
+func (i *logger) SetLevel(l LogLevelEnum) { i.level.Store(int32(l)) }
+
+// Deprecated: use Info.
+func (i *logger) Log(format string, a ...any) { i.info(caller.Upper(), format, a...) }
+func (i *logger) Info(f string, a ...any)     { i.info(caller.Upper(), f, a...) }
 func (i *logger) Error(f string, a ...any)    { i.emit(ERROR, caller.Upper(), f, a...) }
 func (i *logger) Warn(f string, a ...any)     { i.emit(WARN, caller.Upper(), f, a...) }
 func (i *logger) Debug(f string, a ...any)    { i.emit(DEBUG, caller.Upper(), f, a...) }
+
+func (i *logger) info(call caller.Ptr, format string, args ...any) {
+	i.emit(LOG, call, format, args...)
+}
 
 // exitFn is the process-terminator used by Fatal. Defaults to os.Exit and is
 // overridable from tests so we can verify the defer-fires-on-panic behavior
@@ -238,8 +244,9 @@ func (i *innerLogger) Clone() Interface {
 	}
 }
 
-func (i *innerLogger) Log(f string, a ...any)   { i.emit(LOG, caller.Upper(), f, a...) }
-func (i *innerLogger) Info(f string, a ...any)  { i.emit(LOG, caller.Upper(), f, a...) }
+// Deprecated: use Info.
+func (i *innerLogger) Log(f string, a ...any)   { i.info(caller.Upper(), f, a...) }
+func (i *innerLogger) Info(f string, a ...any)  { i.info(caller.Upper(), f, a...) }
 func (i *innerLogger) Error(f string, a ...any) { i.emit(ERROR, caller.Upper(), f, a...) }
 func (i *innerLogger) Warn(f string, a ...any)  { i.emit(WARN, caller.Upper(), f, a...) }
 func (i *innerLogger) Debug(f string, a ...any) { i.emit(DEBUG, caller.Upper(), f, a...) }
@@ -250,6 +257,10 @@ func (i *innerLogger) Fatal(f string, a ...any) {
 
 func (i *innerLogger) emit(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
 	i.emitAt(level, call, time.Now(), format, args...)
+}
+
+func (i *innerLogger) info(call caller.Ptr, format string, args ...any) {
+	i.emit(LOG, call, format, args...)
 }
 
 func (i *innerLogger) emitAt(level LogLevelEnum, call caller.Ptr, t time.Time, format string, args ...any) {

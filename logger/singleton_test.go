@@ -187,8 +187,11 @@ func TestLog(t *testing.T) {
 	Log(format, args...)
 
 	// Verify
-	if !mockLogger.logCalled {
-		t.Error("Log() did not call the underlying logger's Log method")
+	if mockLogger.logCalled {
+		t.Error("Log() should not call the deprecated underlying Log method")
+	}
+	if !mockLogger.infoCalled {
+		t.Error("Log() did not call the underlying logger's Info method")
 	}
 	if mockLogger.lastFormat != format {
 		t.Errorf("Log() expected format %s, got %s", format, mockLogger.lastFormat)
