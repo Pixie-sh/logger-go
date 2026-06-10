@@ -78,9 +78,10 @@ type logger struct {
 type innerLogger struct {
 	*logger
 
-	mu     sync.RWMutex
-	ctx    context.Context
-	fields map[string]any
+	mu              sync.RWMutex
+	ctx             context.Context
+	fields          map[string]any
+	cachedCtxFields map[string]any
 }
 
 // NewLogger creates a new logger with default values.
@@ -121,11 +122,36 @@ func (i *logger) Level() LogLevelEnum     { return LogLevelEnum(i.level.Load()) 
 func (i *logger) SetLevel(l LogLevelEnum) { i.level.Store(int32(l)) }
 
 // Deprecated: use Info.
-func (i *logger) Log(format string, a ...any) { i.info(caller.Upper(), format, a...) }
-func (i *logger) Info(f string, a ...any)     { i.info(caller.Upper(), f, a...) }
-func (i *logger) Error(f string, a ...any)    { i.emit(ERROR, caller.Upper(), f, a...) }
-func (i *logger) Warn(f string, a ...any)     { i.emit(WARN, caller.Upper(), f, a...) }
-func (i *logger) Debug(f string, a ...any)    { i.emit(DEBUG, caller.Upper(), f, a...) }
+func (i *logger) Log(format string, a ...any) {
+	if i.Level() < LOG {
+		return
+	}
+	i.info(caller.Upper(), format, a...)
+}
+func (i *logger) Info(f string, a ...any) {
+	if i.Level() < LOG {
+		return
+	}
+	i.info(caller.Upper(), f, a...)
+}
+func (i *logger) Error(f string, a ...any) {
+	if i.Level() < ERROR {
+		return
+	}
+	i.emit(ERROR, caller.Upper(), f, a...)
+}
+func (i *logger) Warn(f string, a ...any) {
+	if i.Level() < WARN {
+		return
+	}
+	i.emit(WARN, caller.Upper(), f, a...)
+}
+func (i *logger) Debug(f string, a ...any) {
+	if i.Level() < DEBUG {
+		return
+	}
+	i.emit(DEBUG, caller.Upper(), f, a...)
+}
 
 func (i *logger) info(call caller.Ptr, format string, args ...any) {
 	i.emit(LOG, call, format, args...)
@@ -147,19 +173,22 @@ func (i *logger) Fatal(f string, a ...any) {
 
 // With returns a new innerLogger carrying the given field.
 func (i *logger) With(field string, value any) Interface {
+	ctx := context.Background()
 	return &innerLogger{
-		logger: i,
-		ctx:    context.Background(),
-		fields: map[string]any{field: value},
+		logger:          i,
+		ctx:             ctx,
+		fields:          map[string]any{field: value},
+		cachedCtxFields: i.extractCtxFields(ctx),
 	}
 }
 
 // WithCtx returns a new innerLogger bound to the given ctx.
 func (i *logger) WithCtx(ctx context.Context) Interface {
 	return &innerLogger{
-		logger: i,
-		ctx:    ctx,
-		fields: map[string]any{},
+		logger:          i,
+		ctx:             ctx,
+		fields:          map[string]any{},
+		cachedCtxFields: i.extractCtxFields(ctx),
 	}
 }
 
@@ -181,6 +210,19 @@ func (i *logger) cloneBase() *logger {
 	}
 	c.level.Store(i.level.Load())
 	return c
+}
+
+func (i *logger) extractCtxFields(ctx context.Context) map[string]any {
+	if ctx == nil {
+		return nil
+	}
+	ctxFields := map[string]any{}
+	for _, cf := range i.expectedCtxFields {
+		if val := ctx.Value(cf); val != nil {
+			ctxFields[cf] = val
+		}
+	}
+	return ctxFields
 }
 
 func (i *logger) emit(level LogLevelEnum, call caller.Ptr, format string, args ...any) {
@@ -224,6 +266,7 @@ func (i *innerLogger) WithCtx(ctx context.Context) Interface {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.ctx = ctx
+	i.cachedCtxFields = i.extractCtxFields(ctx)
 	return i
 }
 
@@ -238,18 +281,44 @@ func (i *innerLogger) Clone() Interface {
 		newFields[k] = v
 	}
 	return &innerLogger{
-		logger: i.cloneBase(),
-		ctx:    i.ctx,
-		fields: newFields,
+		logger:          i.cloneBase(),
+		ctx:             i.ctx,
+		fields:          newFields,
+		cachedCtxFields: i.cachedCtxFields,
 	}
 }
 
 // Deprecated: use Info.
-func (i *innerLogger) Log(f string, a ...any)   { i.info(caller.Upper(), f, a...) }
-func (i *innerLogger) Info(f string, a ...any)  { i.info(caller.Upper(), f, a...) }
-func (i *innerLogger) Error(f string, a ...any) { i.emit(ERROR, caller.Upper(), f, a...) }
-func (i *innerLogger) Warn(f string, a ...any)  { i.emit(WARN, caller.Upper(), f, a...) }
-func (i *innerLogger) Debug(f string, a ...any) { i.emit(DEBUG, caller.Upper(), f, a...) }
+func (i *innerLogger) Log(f string, a ...any) {
+	if i.Level() < LOG {
+		return
+	}
+	i.info(caller.Upper(), f, a...)
+}
+func (i *innerLogger) Info(f string, a ...any) {
+	if i.Level() < LOG {
+		return
+	}
+	i.info(caller.Upper(), f, a...)
+}
+func (i *innerLogger) Error(f string, a ...any) {
+	if i.Level() < ERROR {
+		return
+	}
+	i.emit(ERROR, caller.Upper(), f, a...)
+}
+func (i *innerLogger) Warn(f string, a ...any) {
+	if i.Level() < WARN {
+		return
+	}
+	i.emit(WARN, caller.Upper(), f, a...)
+}
+func (i *innerLogger) Debug(f string, a ...any) {
+	if i.Level() < DEBUG {
+		return
+	}
+	i.emit(DEBUG, caller.Upper(), f, a...)
+}
 func (i *innerLogger) Fatal(f string, a ...any) {
 	defer exitFn(1)
 	i.emit(FATAL, caller.Upper(), f, a...)
@@ -307,13 +376,10 @@ func (i *innerLogger) ctxLog(ctx context.Context) any {
 	if ctx == nil {
 		return nil
 	}
-	ctxFields := map[string]any{}
-	for _, cf := range i.expectedCtxFields {
-		if val := ctx.Value(cf); val != nil {
-			ctxFields[cf] = val
-		}
+	if i.cachedCtxFields != nil {
+		return i.cachedCtxFields
 	}
-	return ctxFields
+	return i.extractCtxFields(ctx)
 }
 
 // isNilish returns true for both untyped nil and typed-nil interface values

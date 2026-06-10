@@ -168,6 +168,20 @@ func TestCtxKeyAlwaysPresentWithWithCtx(t *testing.T) {
 	assert.True(t, has, "ctx key must remain in the JSON schema once WithCtx has been called")
 }
 
+func TestWithCtxNilDoesNotPanic(t *testing.T) {
+	var buf bytes.Buffer
+	l, err := NewLogger(&buf, "App", "Scope", "uid", DEBUG, []string{TraceID})
+	assert.NoError(t, err)
+
+	assert.NotPanics(t, func() {
+		l.With("field", "value").WithCtx(nil).Log("hi")
+	})
+
+	var entry map[string]any
+	assert.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry))
+	assert.NotContains(t, entry, "ctx")
+}
+
 // --- #12: UnmarshalJSON of null leaves zero value ---
 // covered in interface_test.go TestLevelJSONRoundtrip
 

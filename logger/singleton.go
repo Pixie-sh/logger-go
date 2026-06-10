@@ -94,19 +94,72 @@ func SetLevel(l LogLevelEnum)                { must(); getLogger().SetLevel(l) }
 
 // caller.Upper() MUST be evaluated in the singleton wrapper itself, not in
 // a helper — its depth-3 lookup assumes the chain user → singleton.X →
-// caller.Upper. Calling it one frame deeper would still point at the
-// wrapper. We pass the resolved caller and the active logger into a small
-// dispatcher.
+// caller.Upper. Calling it one frame deeper would point at the wrong frame.
 
 // Deprecated: use Info.
-func Log(format string, args ...any)   { info(caller.Upper(), format, args) }
-func Info(format string, args ...any)  { info(caller.Upper(), format, args) }
-func Error(format string, args ...any) { dispatch(ERROR, caller.Upper(), format, args) }
-func Warn(format string, args ...any)  { dispatch(WARN, caller.Upper(), format, args) }
-func Debug(format string, args ...any) { dispatch(DEBUG, caller.Upper(), format, args) }
+func Log(format string, args ...any) {
+	must()
+	l := getLogger()
+	if e, ok := l.(internalEmit); ok {
+		if l.Level() < LOG {
+			return
+		}
+		e.emitAt(LOG, caller.Upper(), time.Now(), format, args...)
+		return
+	}
+	l.Info(format, args...)
+}
 
-func info(c caller.Ptr, format string, args []any) {
-	dispatch(LOG, c, format, args)
+func Info(format string, args ...any) {
+	must()
+	l := getLogger()
+	if e, ok := l.(internalEmit); ok {
+		if l.Level() < LOG {
+			return
+		}
+		e.emitAt(LOG, caller.Upper(), time.Now(), format, args...)
+		return
+	}
+	l.Info(format, args...)
+}
+
+func Error(format string, args ...any) {
+	must()
+	l := getLogger()
+	if e, ok := l.(internalEmit); ok {
+		if l.Level() < ERROR {
+			return
+		}
+		e.emitAt(ERROR, caller.Upper(), time.Now(), format, args...)
+		return
+	}
+	l.Error(format, args...)
+}
+
+func Warn(format string, args ...any) {
+	must()
+	l := getLogger()
+	if e, ok := l.(internalEmit); ok {
+		if l.Level() < WARN {
+			return
+		}
+		e.emitAt(WARN, caller.Upper(), time.Now(), format, args...)
+		return
+	}
+	l.Warn(format, args...)
+}
+
+func Debug(format string, args ...any) {
+	must()
+	l := getLogger()
+	if e, ok := l.(internalEmit); ok {
+		if l.Level() < DEBUG {
+			return
+		}
+		e.emitAt(DEBUG, caller.Upper(), time.Now(), format, args...)
+		return
+	}
+	l.Debug(format, args...)
 }
 
 func Fatal(format string, args ...any) {
@@ -121,23 +174,4 @@ func Fatal(format string, args ...any) {
 	// Custom Interface implementer (or test mock) — defer to its Fatal so
 	// it controls whether the process exits.
 	l.Fatal(format, args...)
-}
-
-func dispatch(level LogLevelEnum, c caller.Ptr, format string, args []any) {
-	must()
-	l := getLogger()
-	if e, ok := l.(internalEmit); ok {
-		e.emitAt(level, c, time.Now(), format, args...)
-		return
-	}
-	switch level {
-	case ERROR:
-		l.Error(format, args...)
-	case WARN:
-		l.Warn(format, args...)
-	case DEBUG:
-		l.Debug(format, args...)
-	default:
-		l.Info(format, args...)
-	}
 }
