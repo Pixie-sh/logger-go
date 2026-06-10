@@ -1,3 +1,6 @@
+// Package mapper provides small reflection helpers used by the logger to
+// decode arbitrary maps/structs into typed targets and to classify input
+// kinds (pointer / nilable / complex).
 package mapper
 
 import (
@@ -50,7 +53,7 @@ func IsPointer(i interface{}) bool {
 		return false
 	}
 
-	return reflect.TypeOf(i).Kind() == reflect.Ptr
+	return reflect.TypeOf(i).Kind() == reflect.Pointer
 }
 
 func Nil(i interface{}) bool {
@@ -59,7 +62,7 @@ func Nil(i interface{}) bool {
 	}
 
 	switch reflect.TypeOf(i).Kind() {
-	case reflect.Ptr, reflect.Map, reflect.Array, reflect.Chan, reflect.Slice, reflect.Func:
+	case reflect.Pointer, reflect.Map, reflect.Array, reflect.Chan, reflect.Slice, reflect.Func:
 		return reflect.ValueOf(i).IsNil()
 	}
 

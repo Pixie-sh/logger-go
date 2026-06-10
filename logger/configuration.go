@@ -1,19 +1,16 @@
 package logger
 
 import (
-	"context"
 	"io"
 	"os"
-
-	"github.com/pixie-sh/logger-go/mapper"
 )
 
-// FactoryConfiguration defines the required logger factory configuration
+// FactoryConfiguration defines the required logger factory configuration.
 type FactoryConfiguration struct {
 	Mapping map[string]FactoryCreateFn
 }
 
-// DefaultFactoryConfiguration default factory configuration that creates tje json logger
+// DefaultFactoryConfiguration registers the JSON and text driver creators.
 var DefaultFactoryConfiguration = FactoryConfiguration{
 	Mapping: map[string]FactoryCreateFn{
 		JSONLoggerDriver: createJSONLogger,
@@ -21,70 +18,53 @@ var DefaultFactoryConfiguration = FactoryConfiguration{
 	},
 }
 
-func createJSONLogger(ctx context.Context, generic Configuration) (Interface, error) {
-	var cfg JSONLoggerConfiguration
-	err := mapper.ObjectToStruct(generic.Values, &cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.Writer == nil {
-		cfg.Writer = os.Stdout //default
-	}
-
-	return NewLogger(
-		ctx,
-		cfg.Writer,
-		generic.App,
-		generic.Scope,
-		generic.UID,
-		generic.LogLevel,
-		append(generic.ExpectedCtxFields, TraceID),
-		DefaultJSONParser,
-	)
-}
-
-func createTextLogger(ctx context.Context, generic Configuration) (Interface, error) {
-	var cfg TextLoggerConfiguration
-	err := mapper.ObjectToStruct(generic.Values, &cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.Writer == nil {
-		cfg.Writer = os.Stdout //default
-	}
-
-	return NewLogger(
-		ctx,
-		cfg.Writer,
-		generic.App,
-		generic.Scope,
-		generic.UID,
-		generic.LogLevel,
-		append(generic.ExpectedCtxFields, TraceID),
-		DefaultTextParser,
-	)
-}
-
-// Configuration  logger generic config
+// Configuration is the generic logger configuration consumed by a Factory.
+//
+// Writer is not serialized — supply it programmatically before calling Create.
 type Configuration struct {
 	App               string       `toml:"app" json:"app" mapstructure:"app"`
 	Scope             string       `toml:"scope" json:"scope" mapstructure:"scope"`
 	UID               string       `toml:"uid" json:"uid" mapstructure:"uid"`
 	LogLevel          LogLevelEnum `toml:"level" json:"level" mapstructure:"level"`
 	Driver            string       `toml:"driver" json:"driver" mapstructure:"driver"`
-	Values            any          `toml:"values" json:"values" mapstructure:"values"`
 	ExpectedCtxFields []string     `toml:"expectedCtxFields" json:"expectedCtxFields" mapstructure:"expectedCtxFields"`
+	Writer            io.Writer    `toml:"-" json:"-" mapstructure:"-"`
 }
 
-// JSONLoggerConfiguration json logger with specific
-type JSONLoggerConfiguration struct {
-	Writer io.Writer
+func createJSONLogger(cfg Configuration) (Interface, error) {
+	return newFromConfig(cfg, DefaultJSONParser)
 }
 
-// TextLoggerConfiguration represents the configuration for a text-based logger.
-// This includes details such as the destination writer for the log output.
-type TextLoggerConfiguration struct {
-	Writer io.Writer
+func createTextLogger(cfg Configuration) (Interface, error) {
+	return newFromConfig(cfg, DefaultTextParser)
+}
+
+func newFromConfig(cfg Configuration, parser ParserFn) (Interface, error) {
+	w := cfg.Writer
+	if w == nil {
+		w = os.Stdout
+	}
+	// Defensive copy: appending TraceID directly onto cfg.ExpectedCtxFields
+	// would alias into the caller's backing array when it has spare capacity.
+	// Also dedupe so an explicit TraceID in config isn't walked twice.
+	fields := make([]string, 0, len(cfg.ExpectedCtxFields)+1)
+	seenTraceID := false
+	for _, f := range cfg.ExpectedCtxFields {
+		if f == TraceID {
+			seenTraceID = true
+		}
+		fields = append(fields, f)
+	}
+	if !seenTraceID {
+		fields = append(fields, TraceID)
+	}
+	return NewLogger(
+		w,
+		cfg.App,
+		cfg.Scope,
+		cfg.UID,
+		cfg.LogLevel,
+		fields,
+		parser,
+	)
 }

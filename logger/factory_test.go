@@ -3,27 +3,24 @@ package logger
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFactory(t *testing.T) {
-	factory, err := NewFactory(context.Background(), DefaultFactoryConfiguration)
+	factory, err := NewFactory(DefaultFactoryConfiguration)
 	assert.Nil(t, err)
 
-	logger, err := factory.Create(context.Background(), Configuration{
-		App:      "App",
-		Scope:    "Scope",
-		UID:      "uid",
-		LogLevel: LOG,
-		Driver:   JSONLoggerDriver,
-		Values: JSONLoggerConfiguration{
-			Writer: os.Stdout,
-		},
-		ExpectedCtxFields: []string{
-			"someValKey",
-		},
+	logger, err := factory.Create(Configuration{
+		App:               "App",
+		Scope:             "Scope",
+		UID:               "uid",
+		LogLevel:          LOG,
+		Driver:            JSONLoggerDriver,
+		Writer:            os.Stdout,
+		ExpectedCtxFields: []string{"someValKey"},
 	})
 	assert.Nil(t, err)
 
